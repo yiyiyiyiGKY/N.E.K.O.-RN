@@ -18,6 +18,7 @@ N.E.K.O. (NEural Knowledge Oriented) 是一个创新的跨平台虚拟角色应�
 - **语言**: TypeScript
 - **架构**: React New Architecture
 - **路由**: Expo Router (文件路由)
+- **文档**: [📚 规范文档中心 (SDD)](./docs/README.md)
 
 ## 快速开始
 
