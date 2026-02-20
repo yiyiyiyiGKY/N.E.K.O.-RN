@@ -101,6 +101,15 @@ export default function HomeScreen() {
           测试 WebSocket 实时音频流播放和唇形同步功能（推荐使用此页面测试完整功能）。
         </ThemedText>
       </ThemedView>
+      <ThemedView style={styles.stepContainer}>
+        <ThemedText type="subtitle">⚙️ 管理页面</ThemedText>
+        <Link href="/character-manager">
+          <ThemedText>🐱 角色管理</ThemedText>
+        </Link>
+        <Link href="/settings">
+          <ThemedText>🔑 API 设置</ThemedText>
+        </Link>
+      </ThemedView>
     </ParallaxScrollView>
   );
 }
