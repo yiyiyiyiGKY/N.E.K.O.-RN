@@ -1,5 +1,6 @@
 import { createCharactersApiClient } from '@/services/api/characters';
 import type { CharactersData } from '@/services/api/characters';
+import { buildHttpBaseURL } from '@/utils/devConnectionConfig';
 import { useAudio } from '@/hooks/useAudio';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
@@ -408,7 +409,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       const loadCharacters = async () => {
         try {
           setCharacterLoading(true);
-          const apiBase = `http://${config.host}:${config.port}/api`;
+          const apiBase = `${buildHttpBaseURL(config)}/api`;
           const client = createCharactersApiClient(apiBase);
           const data: CharactersData = await client.getCharacters();
 
@@ -420,6 +421,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
           setCharacterList(names);
           setCurrentCatgirl(data.当前猫娘 || null);
+          setToolbarOpenPanel(null);
           setCharacterModalVisible(true);
         } catch (err: any) {
           Alert.alert('获取角色列表失败', err.message || '网络错误');
@@ -431,12 +433,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       return;
     }
     Alert.alert('功能提示', `即将打开: ${id}`);
-  }, [config.host, config.port]);
+  }, [config]);
 
   const handleSwitchCharacter = useCallback(async (name: string) => {
     try {
       setCharacterLoading(true);
-      const apiBase = `http://${config.host}:${config.port}/api`;
+      const apiBase = `${buildHttpBaseURL(config)}/api`;
       const client = createCharactersApiClient(apiBase);
       const res = await client.setCurrentCatgirl(name);
 
@@ -452,7 +454,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     } finally {
       setCharacterLoading(false);
     }
-  }, [config.host, config.port]);
+  }, [config]);
 
   // 确保 text session 已启动（与 Web 端一致的 Legacy 协议）
   const ensureTextSession = useCallback(async (): Promise<boolean> => {

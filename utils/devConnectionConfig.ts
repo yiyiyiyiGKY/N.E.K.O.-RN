@@ -5,7 +5,7 @@ export type DevConnectionConfig = {
 };
 
 export const DEFAULT_DEV_CONNECTION_CONFIG: DevConnectionConfig = {
-  host: '192.168.77.225',
+  host: '127.0.0.1',
   port: 48911,
   characterName: 'test',
 };

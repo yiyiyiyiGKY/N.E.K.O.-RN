@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
+import { buildHttpBaseURL } from '@/utils/devConnectionConfig';
 import {
   createCharactersApiClient,
   catgirlToCharacter,
@@ -48,7 +49,7 @@ const Icons = {
 export default function CharacterManagerScreen() {
   const router = useRouter();
   const { config } = useDevConnectionConfig();
-  const apiBase = `http://${config.host}:${config.port}`;
+  const apiBase = `${buildHttpBaseURL(config)}/api`;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

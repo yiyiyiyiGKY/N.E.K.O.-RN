@@ -17,7 +17,8 @@
         "NSMicrophoneUsageDescription": "需要使用麦克风进行语音输入",
         "NSCameraUsageDescription": "需要使用相机扫描二维码进行开发配置"
       },
-      "bundleIdentifier": "com.neko.app"
+      "bundleIdentifier": "com.neko.app",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -36,7 +37,8 @@
         "MODIFY_AUDIO_SETTINGS"
       ],
       "usesCleartextTraffic": false,
-      "package": "com.neko.app"
+      "package": "com.neko.app",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
