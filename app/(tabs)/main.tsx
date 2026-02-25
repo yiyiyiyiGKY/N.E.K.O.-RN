@@ -1,3 +1,5 @@
+import { createCharactersApiClient } from '@/services/api/characters';
+import type { CharactersData } from '@/services/api/characters';
 import { useAudio } from '@/hooks/useAudio';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
@@ -9,7 +11,10 @@ import { mainManager } from '@/utils/MainManager';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Dimensions, Platform, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert, Dimensions, Modal, Platform, ScrollView,
+  StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View,
+} from 'react-native';
 import { ReactNativeLive2dView } from 'react-native-live2d';
 import {
   Live2DRightToolbar,
@@ -31,6 +36,12 @@ function generateMessageId(counter: number): string {
 const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
   const [isPageFocused, setIsPageFocused] = useState(true);
+
+  // 角色选择 Modal 状态
+  const [characterModalVisible, setCharacterModalVisible] = useState(false);
+  const [characterList, setCharacterList] = useState<string[]>([]);
+  const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
+  const [characterLoading, setCharacterLoading] = useState(false);
   const { config, applyQrRaw } = useDevConnectionConfig();
   const params = useLocalSearchParams<{
     qr?: string;
@@ -393,9 +404,55 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   }, []);
 
   const handleSettingsMenuClick = useCallback((id: string) => {
-    // RN 中可以导航到对应页面
+    if (id === 'characterManage') {
+      const loadCharacters = async () => {
+        try {
+          setCharacterLoading(true);
+          const apiBase = `http://${config.host}:${config.port}/api`;
+          const client = createCharactersApiClient(apiBase);
+          const data: CharactersData = await client.getCharacters();
+
+          const names = Object.keys(data.猫娘 || {});
+          if (names.length === 0) {
+            Alert.alert('角色管理', '暂无可用角色');
+            return;
+          }
+
+          setCharacterList(names);
+          setCurrentCatgirl(data.当前猫娘 || null);
+          setCharacterModalVisible(true);
+        } catch (err: any) {
+          Alert.alert('获取角色列表失败', err.message || '网络错误');
+        } finally {
+          setCharacterLoading(false);
+        }
+      };
+      loadCharacters();
+      return;
+    }
     Alert.alert('功能提示', `即将打开: ${id}`);
-  }, []);
+  }, [config.host, config.port]);
+
+  const handleSwitchCharacter = useCallback(async (name: string) => {
+    try {
+      setCharacterLoading(true);
+      const apiBase = `http://${config.host}:${config.port}/api`;
+      const client = createCharactersApiClient(apiBase);
+      const res = await client.setCurrentCatgirl(name);
+
+      if (res.success) {
+        setCurrentCatgirl(name);
+        setCharacterModalVisible(false);
+        Alert.alert('切换成功', `已切换到角色: ${name}`);
+      } else {
+        Alert.alert('切换失败', res.error || '未知错误');
+      }
+    } catch (err: any) {
+      Alert.alert('切换失败', err.message || '网络错误');
+    } finally {
+      setCharacterLoading(false);
+    }
+  }, [config.host, config.port]);
 
   // 确保 text session 已启动（与 Web 端一致的 Legacy 协议）
   const ensureTextSession = useCallback(async (): Promise<boolean> => {
@@ -616,6 +673,59 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           disabled={!audio.isConnected}
         />
       </View>
+
+      {/* 角色选择 Modal */}
+      <Modal
+        visible={characterModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCharacterModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setCharacterModalVisible(false)}>
+          <View style={styles.characterModalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.characterModalContent}>
+                <Text style={styles.characterModalTitle}>选择角色</Text>
+                <Text style={styles.characterModalSubtitle}>
+                  当前: {currentCatgirl || '未设置'}
+                </Text>
+                <ScrollView style={styles.characterModalList}>
+                  {characterList.map((name) => {
+                    const isCurrent = name === currentCatgirl;
+                    return (
+                      <TouchableOpacity
+                        key={name}
+                        style={[
+                          styles.characterModalItem,
+                          isCurrent && styles.characterModalItemCurrent,
+                        ]}
+                        disabled={isCurrent || characterLoading}
+                        onPress={() => handleSwitchCharacter(name)}
+                      >
+                        <Text style={[
+                          styles.characterModalItemText,
+                          isCurrent && styles.characterModalItemTextCurrent,
+                        ]}>
+                          {isCurrent ? `✓ ${name}` : name}
+                        </Text>
+                        {isCurrent && (
+                          <Text style={styles.characterModalBadge}>当前</Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+                <TouchableOpacity
+                  style={styles.characterModalClose}
+                  onPress={() => setCharacterModalVisible(false)}
+                >
+                  <Text style={styles.characterModalCloseText}>取消</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }
@@ -657,6 +767,72 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 100,
+  },
+  characterModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  characterModalContent: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+    maxHeight: '60%',
+  },
+  characterModalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  characterModalSubtitle: {
+    color: '#888',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  characterModalList: {
+    maxHeight: 300,
+  },
+  characterModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  characterModalItemCurrent: {
+    backgroundColor: 'rgba(64, 197, 241, 0.15)',
+    borderWidth: 1,
+    borderColor: '#40C5F1',
+  },
+  characterModalItemText: {
+    color: '#fff',
+    fontSize: 15,
+  },
+  characterModalItemTextCurrent: {
+    color: '#40C5F1',
+    fontWeight: '600',
+  },
+  characterModalBadge: {
+    color: '#40C5F1',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  characterModalClose: {
+    marginTop: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  characterModalCloseText: {
+    color: '#888',
+    fontSize: 15,
   },
 });
 

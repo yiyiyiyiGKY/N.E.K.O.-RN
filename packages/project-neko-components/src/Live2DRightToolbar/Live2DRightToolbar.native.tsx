@@ -93,7 +93,7 @@ export function Live2DRightToolbar({
     icons: {
       live2dSettings: require('../../../../assets/icons/set_off.png'),
       apiKeys: require('../../../../assets/icons/set_off.png'),
-      characterManage: require('../../../../assets/icons/set_off.png'),
+      characterManage: require('../../../../assets/icons/character_icon.png'),
       voiceClone: require('../../../../assets/icons/set_off.png'),
       memoryBrowser: require('../../../../assets/icons/set_off.png'),
       steamWorkshop: require('../../../../assets/icons/set_off.png'),
@@ -219,6 +219,27 @@ export function Live2DRightToolbar({
                           </View>
                         </TouchableOpacity>
                       ))}
+                    </>
+                  )}
+
+                  {/* 移动端：仅显示角色管理入口 */}
+                  {isMobile && (
+                    <>
+                      <View style={styles.separator} />
+                      {settingsMenuItems
+                        .filter((item) => item.id === 'characterManage')
+                        .map((item) => (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={styles.menuItem}
+                            onPress={() => onSettingsMenuClick?.(item.id as Live2DSettingsMenuId)}
+                          >
+                            <View style={styles.menuItemContent}>
+                              <Image source={item.icon} style={styles.menuIcon} />
+                              <Text style={styles.menuItemText}>{item.label}</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
                     </>
                   )}
                 </ScrollView>

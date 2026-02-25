@@ -117,7 +117,7 @@ export default function CharacterManagerScreen() {
       const profile: MasterProfile = { 档案名: masterProfile.name };
       if (masterProfile.nickname) profile.昵称 = masterProfile.nickname;
       if (masterProfile.gender) profile.性别 = masterProfile.gender;
-
+  
       const result = await client.updateMaster(profile);
 
       if (result.success) {
@@ -343,6 +343,15 @@ export default function CharacterManagerScreen() {
                   style={styles.input}
                   value={masterProfile.nickname || ''}
                   onChangeText={(text) => setMasterProfile({ ...masterProfile, nickname: text })}
+                  placeholder="Optional"
+                />
+              </View>
+              <View style={styles.field}>
+                <Text style={styles.label}>gender</Text>
+                <TextInput
+                  style={styles.input}
+                  value={masterProfile.gender}
+                  onChangeText={(text) => setMasterProfile({ ...masterProfile, gender: text })}
                   placeholder="Optional"
                 />
               </View>
