@@ -7,6 +7,8 @@ interface UseAudioConfig {
   characterName: string;
   onMessage?: (event: MessageEvent) => void;
   onConnectionChange?: (isConnected: boolean) => void;
+  // 🔥 新增：角色切换标志 ref，用于在切换期间忽略错误
+  isSwitchingRef?: React.RefObject<boolean>;
 }
 
 export interface UseAudioReturn {
@@ -24,6 +26,9 @@ export interface UseAudioReturn {
 
   // 原始 Service 引用（供高级用户使用）
   audioService: AudioService | null;
+
+  // 🔥 新增：AudioService 是否完全就绪的 ref（避免闭包引用问题）
+  isReadyRef: React.RefObject<boolean>;
 }
 
 export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
@@ -43,6 +48,9 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
 
   // Service 引用
   const audioServiceRef = useRef<AudioService | null>(null);
+
+  // 🔥 AudioService 是否完全就绪的 ref（避免闭包引用问题）
+  const isReadyRef = useRef<boolean>(false);
 
   // 切换录音状态
   const toggleRecording = async () => {
@@ -71,8 +79,12 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
 
   // 组件初始化
   useEffect(() => {
-    console.log('🎧 useAudio 初始化中...');
-    
+    console.log('🎧 useAudio 初始化中...', {
+      host: config.host,
+      port: config.port,
+      characterName: config.characterName,
+    });
+
     // 创建 AudioService
     audioServiceRef.current = new AudioService({
       host: config.host,
@@ -87,6 +99,11 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
         config.onMessage?.(event);
       },
       onError: (error) => {
+        // 🔥 修复：在角色切换期间忽略错误，避免显示"连接错误"
+        if (config.isSwitchingRef?.current) {
+          console.log('🔄 角色切换中，忽略 WebSocket 错误:', error);
+          return;
+        }
         console.error('❌ 音频服务错误:', error);
         setConnectionStatus('连接错误');
       },
@@ -102,6 +119,13 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
     audioServiceRef.current.init().catch(error => {
       console.error('❌ AudioService 初始化失败:', error);
       setConnectionStatus('初始化失败');
+      isReadyRef.current = false;
+    }).then(() => {
+      // 🔥 初始化完成后，更新 isReadyRef
+      if (audioServiceRef.current?.isReady()) {
+        console.log('✅ AudioService 已完全就绪，更新 isReadyRef');
+        isReadyRef.current = true;
+      }
     });
 
     // 清理函数
@@ -111,6 +135,8 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
       audioServiceRef.current = null;
       setIsRecording(false);
       setIsConnected(false);
+      // 🔥 修复：清理时重置 isReadyRef，避免 waitForConnection 误判
+      isReadyRef.current = false;
     };
   }, [config.host, config.port, config.characterName]);
 
@@ -120,14 +146,17 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
     isRecording,
     connectionStatus,
     audioStats,
-    
+
     // 方法
     toggleRecording,
     clearAudioQueue,
     handleUserSpeechDetection,
     sendMessage,
-    
+
     // 原始 Service 引用（供高级用户使用）
     audioService: audioServiceRef.current,
+
+    // AudioService 是否完全就绪的 ref（避免闭包引用问题）
+    isReadyRef,
   };
 };

@@ -21,6 +21,7 @@ export type NekoWsOutgoingJson =
   | { action: "start_session"; input_type: "audio" | "text"; new_session?: boolean; audio_format?: string }
   | { action: "pause_session" }
   | { action: "end_session" }
+  | { action: "interrupt_audio" }
   | { action: "stream_data"; input_type: "audio" | "text" | "screen" | "camera"; data: any }
   | Record<string, unknown>;
 

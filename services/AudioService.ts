@@ -531,6 +531,23 @@ export class AudioService {
   }
 
   /**
+   * 是否已完全初始化
+   */
+  isReady(): boolean {
+    const ready = this.isInitialized && this.connectionStatus === ConnectionStatus.CONNECTED;
+    // 🔍 调试日志：帮助诊断初始化问题
+    if (!ready) {
+      console.log('🔍 AudioService.isReady() = false', {
+        isInitialized: this.isInitialized,
+        connectionStatus: this.connectionStatus,
+        hasWsService: this.wsService !== null,
+        hasAudioService: this.audioService !== null,
+      });
+    }
+    return ready;
+  }
+
+  /**
    * 销毁服务
    */
   destroy(): void {

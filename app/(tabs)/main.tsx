@@ -147,6 +147,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const sessionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSessionPromiseRef = useRef<Promise<boolean> | null>(null);
 
+  // 角色切换标志：在切换期间不显示断开/连接消息
+  const isSwitchingCharacterRef = useRef(false);
+
+  // 用 ref 跟踪最新连接状态，避免 waitForConnection 里的 stale closure 问题
+  const isConnectedRef = useRef(false);
+
   // Agent Backend 管理（传入 openPanel 以支持动态刷新）
   const { agent, onAgentChange, refreshAgentState } = useLive2DAgentBackend({
     apiBase: `http://${config.host}:${config.port}`,
@@ -167,6 +173,8 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     host: config.host,
     port: config.port,
     characterName: config.characterName,
+    // 🔥 传入角色切换标志，用于在切换期间忽略错误
+    isSwitchingRef: isSwitchingCharacterRef,
     onMessage: async (event) => {
       // 🔍 调试：检查是否收到二进制数据
       if (typeof event.data !== 'string') {
@@ -240,6 +248,18 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       }
     },
     onConnectionChange: (connected) => {
+      // 始终同步 ref，供 waitForConnection 读取最新值（避免 stale closure）
+      isConnectedRef.current = connected;
+
+      // 在角色切换期间，不显示断开/连接消息
+      if (isSwitchingCharacterRef.current) {
+        console.log(`🔄 角色切换中，忽略连接状态变化: ${connected}`);
+        if (!connected) {
+          // 断开时重置 text session 状态
+          setIsTextSessionActive(false);
+        }
+        return;
+      }
       if (connected) {
         chat.addMessage('已连接到服务器', 'system');
       } else {
@@ -251,7 +271,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   });
 
   // 将 audio.connectionStatus 映射到 ConnectionStatus 类型
-  const connectionStatus: ConnectionStatus = audio.isConnected ? 'open' : 'closed';
+  // 在角色切换期间，保持 'open' 状态，避免显示断开错误
+  const connectionStatus: ConnectionStatus = isSwitchingCharacterRef.current
+    ? 'open'
+    : (audio.isConnected ? 'open' : 'closed');
 
   const live2d = useLive2D({
     modelName: 'mao_pro',
@@ -537,6 +560,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   }, [config]);
 
   const handleSwitchCharacter = useCallback(async (name: string) => {
+    // 🔥 设置角色切换标志，避免显示断开消息
+    isSwitchingCharacterRef.current = true;
+
     try {
       setCharacterLoading(true);
       const apiBase = `${buildHttpBaseURL(config)}/api`;
@@ -555,7 +581,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           characterName: name,
         }));
 
-        // 🔥 等待连接重建（分两阶段：等待断开 -> 等待重连）
+        // 🔥 等待连接重建（分两阶段：等待断开 -> 等待重连 + AudioService 完全就绪）
         const waitForConnection = (): Promise<boolean> => {
           return new Promise((resolve) => {
             let retryCount = 0;
@@ -565,7 +591,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
             const check = () => {
               if (phase === 'waiting_disconnect') {
                 // 阶段1：等待旧连接断开（最多等待 1 秒）
-                if (!audio.isConnected || retryCount >= 2) {
+                if (!isConnectedRef.current || retryCount >= 2) {
                   console.log('🔄 旧连接已断开，等待新连接...');
                   phase = 'waiting_connect';
                   retryCount = 0;
@@ -575,9 +601,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
                   setTimeout(check, 500);
                 }
               } else {
-                // 阶段2：等待新连接建立
-                if (audio.isConnected) {
-                  console.log('✅ 新连接已建立');
+                // 阶段2：等待新连接建立 + AudioService 完全就绪（包括初始化）
+                // 🔥 使用 isReadyRef 避免闭包引用问题
+                const isReady = audio.isReadyRef.current;
+
+                if (isReady) {
+                  console.log('✅ 新连接已建立且 AudioService 已完全初始化');
                   resolve(true);
                 } else if (retryCount >= maxRetries) {
                   console.log('❌ 等待连接超时');
@@ -595,14 +624,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         const connected = await waitForConnection();
 
         if (connected) {
-          // 🔥 等待额外 300ms，确保 WebSocket 真正准备好（避免状态更新延迟）
-          await new Promise(resolve => setTimeout(resolve, 300));
-
-          // 🔍 调试：检查连接状态
-          console.log('🔍 发送前检查:');
-          console.log('  - audio.isConnected:', audio.isConnected);
-          console.log('  - audio.audioService:', audio.audioService ? '存在' : '不存在');
-
           // 发送 start_session 以重新加载 voice_id
           console.log('📤 发送 start_session 以重新加载角色音色');
           const message = {
@@ -629,14 +650,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     } catch (err: any) {
       Alert.alert('切换失败', err.message || '网络错误');
     } finally {
+      // 🔥 修复：延迟重置角色切换标志，给旧连接足够时间清理
+      // 旧 WebSocket 关闭时可能会延迟触发 error 事件，需要延迟重置标志
+      setTimeout(() => {
+        isSwitchingCharacterRef.current = false;
+        console.log('🔄 角色切换标志已重置');
+      }, 2000);  // 延迟 2 秒
       setCharacterLoading(false);
     }
   }, [config, applyQrRaw, audio]);
-
-  // 手动打断 AI 播放
-  const handleInterrupt = useCallback(() => {
-    audio.clearAudioQueue();
-  }, [audio.clearAudioQueue]);
 
   // 确保 text session 已启动（与 Web 端一致的 Legacy 协议）
   const ensureTextSession = useCallback(async (): Promise<boolean> => {
@@ -646,6 +668,13 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     }
 
     if (!audio.isConnected) {
+      console.warn('⚠️ ensureTextSession: 未连接到服务器');
+      return false;
+    }
+
+    // 🔥 检查 AudioService 是否完全就绪（包括初始化完成）
+    if (!audio.audioService?.isReady()) {
+      console.warn('⚠️ ensureTextSession: AudioService 未完全就绪');
       return false;
     }
 
@@ -856,20 +885,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           connectionStatus={connectionStatus}
           onSendMessage={handleSendMessage}
           disabled={!audio.isConnected}
-          renderFloatingOverlay={() =>
-            audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode ? (
-              <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
-                <TouchableOpacity
-                  style={styles.interruptButton}
-                  onPress={handleInterrupt}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.interruptIcon}>■</Text>
-                  <Text style={styles.interruptLabel}>打断</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null
-          }
         />
       </View>
 
@@ -926,19 +941,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* 手动打断按钮：聊天面板收起时的绝对定位浮层（展开时由 renderFloatingOverlay 接管） */}
-      {audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode && (
-        <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
-          <TouchableOpacity
-            style={styles.interruptButton}
-            onPress={handleInterrupt}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.interruptIcon}>■</Text>
-            <Text style={styles.interruptLabel}>打断</Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </View>
   );
 }
@@ -981,33 +983,6 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 100,
     elevation: 100,
-  },
-  interruptButtonWrapper: {
-    position: 'absolute',
-    bottom: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 200,
-    elevation: 200,
-  },
-  interruptButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(220, 50, 50, 0.85)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 24,
-    gap: 6,
-  },
-  interruptIcon: {
-    color: '#fff',
-    fontSize: 14,
-  },
-  interruptLabel: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
   },
   characterModalOverlay: {
     flex: 1,
