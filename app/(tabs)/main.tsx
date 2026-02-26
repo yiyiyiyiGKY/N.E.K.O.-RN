@@ -514,6 +514,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   }, [config]);
 
   const handleSwitchCharacter = useCallback(async (name: string) => {
+    // 检查是否在语音模式
+    if (toolbarMicEnabled) {
+      Alert.alert('无法切换角色', '语音模式下无法切换角色，请先停止语音对话后再切换');
+      return;
+    }
+
     try {
       setCharacterLoading(true);
       const apiBase = `${buildHttpBaseURL(config)}/api`;
@@ -531,12 +537,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       setCharacterLoading(false);
       Alert.alert('切换失败', err.message || '网络错误');
     }
-  }, [config]);
-
-  // 手动打断 AI 播放
-  const handleInterrupt = useCallback(() => {
-    audio.clearAudioQueue();
-  }, [audio.clearAudioQueue]);
+  }, [config, toolbarMicEnabled]);
 
   // 确保 text session 已启动（与 Web 端一致的 Legacy 协议）
   const ensureTextSession = useCallback(async (): Promise<boolean> => {
@@ -756,20 +757,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           onSendMessage={handleSendMessage}
           disabled={!audio.isConnected}
           forceCollapsed={isChatForceCollapsed}
-          renderFloatingOverlay={() =>
-            audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode ? (
-              <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
-                <TouchableOpacity
-                  style={styles.interruptButton}
-                  onPress={handleInterrupt}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.interruptIcon}>■</Text>
-                  <Text style={styles.interruptLabel}>打断</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null
-          }
         />
       </View>
 
@@ -825,20 +812,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
-      {/* 手动打断按钮：聊天面板收起时的绝对定位浮层（展开时由 renderFloatingOverlay 接管） */}
-      {isChatForceCollapsed && audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode && (
-        <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
-          <TouchableOpacity
-            style={styles.interruptButton}
-            onPress={handleInterrupt}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.interruptIcon}>■</Text>
-            <Text style={styles.interruptLabel}>打断</Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </View>
   );
 }
@@ -883,33 +856,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     elevation: 100,
     pointerEvents: 'box-none',
-  },
-  interruptButtonWrapper: {
-    position: 'absolute',
-    bottom: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 200,
-    elevation: 200,
-  },
-  interruptButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(220, 50, 50, 0.85)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 24,
-    gap: 6,
-  },
-  interruptIcon: {
-    color: '#fff',
-    fontSize: 14,
-  },
-  interruptLabel: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
   },
   characterModalOverlay: {
     flex: 1,
