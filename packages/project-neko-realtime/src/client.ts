@@ -210,6 +210,11 @@ export function createRealtimeClient(options: RealtimeClientOptions): RealtimeCl
       return;
     }
 
+    // RN 默认 binaryType 为 "blob"，需要改为 "arraybuffer" 才能正确接收二进制 PCM 数据
+    if ("binaryType" in s) {
+      (s as any).binaryType = "arraybuffer";
+    }
+
     socket = s;
 
     s.onopen = () => {

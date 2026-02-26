@@ -486,6 +486,7 @@ export class AudioService {
     }
 
     const data = typeof message === 'string' ? message : JSON.stringify(message);
+    console.log('📤 AudioService.sendMessage 发送数据:', data.substring(0, 200));
     this.wsService.send(data);
   }
 
@@ -527,6 +528,23 @@ export class AudioService {
    */
   isConnected(): boolean {
     return this.connectionStatus === ConnectionStatus.CONNECTED;
+  }
+
+  /**
+   * 是否已完全初始化
+   */
+  isReady(): boolean {
+    const ready = this.isInitialized && this.connectionStatus === ConnectionStatus.CONNECTED;
+    // 🔍 调试日志：帮助诊断初始化问题
+    if (!ready) {
+      console.log('🔍 AudioService.isReady() = false', {
+        isInitialized: this.isInitialized,
+        connectionStatus: this.connectionStatus,
+        hasWsService: this.wsService !== null,
+        hasAudioService: this.audioService !== null,
+      });
+    }
+    return ready;
   }
 
   /**

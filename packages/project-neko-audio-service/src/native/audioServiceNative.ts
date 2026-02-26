@@ -277,7 +277,7 @@ export function createNativeAudioService(args: {
 
       // 发送启动会话请求
       try {
-        args.client.sendJson({ action: "start_session", input_type: "audio" });
+        args.client.sendJson({ action: "start_session", input_type: "audio", audio_format: "PCM_48000HZ_MONO_16BIT" });
       } catch (e) {
         clearTimeout(timeoutId);
         cleanup();
