@@ -43,7 +43,17 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [characterList, setCharacterList] = useState<string[]>([]);
   const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
-  const { config, applyQrRaw } = useDevConnectionConfig();
+  const [isChatForceCollapsed, setIsChatForceCollapsed] = useState(false);
+  const isSwitchingCharacterRef = useRef(false);
+  // 合并为单一对象，确保 modelName 和 modelUrl 同步更新，避免两次 setState 触发两次 useLive2D effect
+  const [live2dModel, setLive2dModel] = useState<{ name: string; url: string | undefined }>({
+    name: 'mao_pro',
+    url: undefined,
+  });
+  // ref 持有最新值，供 useFocusEffect 闭包读取（避免 stale closure）
+  const live2dModelRef = useRef(live2dModel);
+  live2dModelRef.current = live2dModel;
+  const { config, setConfig, applyQrRaw } = useDevConnectionConfig();
   const params = useLocalSearchParams<{
     qr?: string;
     host?: string;
@@ -92,6 +102,45 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       }
     });
   }, [applyQrRaw, params.characterName, params.host, params.name, params.port, params.qr]);
+
+  // 从后端获取角色对应的 Live2D 模型信息并更新状态
+  const syncLive2dModel = useCallback(async (catgirlName: string) => {
+    try {
+      const apiBase = `${buildHttpBaseURL(config)}/api`;
+      const client = createCharactersApiClient(apiBase);
+      const modelRes = await client.getCurrentLive2dModel(catgirlName);
+      if (modelRes.success && modelRes.model_info) {
+        setLive2dModel({
+          name: modelRes.model_info.name,
+          url: `${buildHttpBaseURL(config)}${modelRes.model_info.path}`,
+        });
+      }
+    } catch (e) {
+      console.warn('[syncLive2dModel] 获取模型信息失败:', e);
+    }
+  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 启动时从服务端获取当前角色，以服务端为准
+  useEffect(() => {
+    const syncCurrentCatgirl = async () => {
+      try {
+        const apiBase = `${buildHttpBaseURL(config)}/api`;
+        const client = createCharactersApiClient(apiBase);
+        const res = await client.getCurrentCatgirl();
+        if (res.current_catgirl) {
+          setCurrentCatgirl(res.current_catgirl);
+          if (config.characterName !== res.current_catgirl) {
+            await setConfig({ ...config, characterName: res.current_catgirl });
+          }
+          await syncLive2dModel(res.current_catgirl);
+        }
+      } catch {
+        // 网络不通时降级：用本地缓存初始化 UI
+        if (config.characterName) setCurrentCatgirl(config.characterName);
+      }
+    };
+    syncCurrentCatgirl();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 工具栏状态管理（与 Web 版本一致）
   const [isMobile, setIsMobile] = useState(true); // RN 默认为移动端
@@ -147,12 +196,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const sessionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSessionPromiseRef = useRef<Promise<boolean> | null>(null);
 
-  // 角色切换标志：在切换期间不显示断开/连接消息
-  const isSwitchingCharacterRef = useRef(false);
-
-  // 用 ref 跟踪最新连接状态，避免 waitForConnection 里的 stale closure 问题
-  const isConnectedRef = useRef(false);
-
   // Agent Backend 管理（传入 openPanel 以支持动态刷新）
   const { agent, onAgentChange, refreshAgentState } = useLive2DAgentBackend({
     apiBase: `http://${config.host}:${config.port}`,
@@ -173,16 +216,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     host: config.host,
     port: config.port,
     characterName: config.characterName,
-    // 🔥 传入角色切换标志，用于在切换期间忽略错误
-    isSwitchingRef: isSwitchingCharacterRef,
     onMessage: async (event) => {
-      // 🔍 调试：检查是否收到二进制数据
-      if (typeof event.data !== 'string') {
-        console.log('🎵 收到二进制数据，大小:', event.data?.byteLength || event.data?.size || 'unknown');
-        return;
-      }
-
-      console.log('📝 收到文本消息:', event.data.substring(0, 100));
+      // 二进制音频数据已由 @project_neko/audio-service 自动播放（通过 Realtime binary 事件接管）
+      // 这里仅保留文本消息处理逻辑
+      if (typeof event.data !== 'string') return;
 
       // 检查 clientMessageId 用于去重
       let parsedMsg: any = null;
@@ -245,23 +282,25 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         mainManager.onUserSpeechDetected();
       } else if (result?.type === 'turn_end') {
         mainManager.onTurnEnd(result.fullText);
+      } else if (result?.type === 'catgirl_switched' && result.characterName) {
+        // 本地和远端切换统一由此处驱动
+        setIsChatForceCollapsed(true);
+        setCharacterLoading(true);
+        isSwitchingCharacterRef.current = true;
+        setCurrentCatgirl(result.characterName);
+        await setConfig({ ...config, characterName: result.characterName });
+        await syncLive2dModel(result.characterName);
       }
     },
     onConnectionChange: (connected) => {
-      // 始终同步 ref，供 waitForConnection 读取最新值（避免 stale closure）
-      isConnectedRef.current = connected;
-
-      // 在角色切换期间，不显示断开/连接消息
-      if (isSwitchingCharacterRef.current) {
-        console.log(`🔄 角色切换中，忽略连接状态变化: ${connected}`);
-        if (!connected) {
-          // 断开时重置 text session 状态
-          setIsTextSessionActive(false);
-        }
-        return;
-      }
       if (connected) {
         chat.addMessage('已连接到服务器', 'system');
+        if (isSwitchingCharacterRef.current) {
+          isSwitchingCharacterRef.current = false;
+          setCharacterLoading(false);
+          setIsChatForceCollapsed(false);
+          Alert.alert('切换成功', `已切换到角色: ${config.characterName}`);
+        }
       } else {
         chat.addMessage('与服务器断开连接', 'system');
         // 连接断开时重置 text session 状态
@@ -271,15 +310,13 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   });
 
   // 将 audio.connectionStatus 映射到 ConnectionStatus 类型
-  // 在角色切换期间，保持 'open' 状态，避免显示断开错误
-  const connectionStatus: ConnectionStatus = isSwitchingCharacterRef.current
-    ? 'open'
-    : (audio.isConnected ? 'open' : 'closed');
+  const connectionStatus: ConnectionStatus = audio.isConnected ? 'open' : 'closed';
 
   const live2d = useLive2D({
-    modelName: 'mao_pro',
+    modelName: live2dModel.name,
+    modelUrl: live2dModel.url,
     backendHost: config.host,
-    backendPort: 8081,
+    backendPort: config.port,
     // 由页面 focus 生命周期触发加载；避免 autoLoad + focus 双重触发导致重复加载
     autoLoad: false,
     // TODO: 集成 preferences repository 到 useLive2D hook
@@ -300,9 +337,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       // 设置页面为焦点状态
       setIsPageFocused(true);
 
-      // 页面获得焦点时触发模型加载（若已在加载/已就绪，Service 内部会自动去重）
-      // 这里放在 focus 生命周期里，确保从其它 Tab 返回时也能恢复模型显示
-      live2d.loadModel();
+      // 只有 url 已就绪（syncLive2dModel 完成后）才触发加载
+      // 避免启动时 url 还是 undefined，回退到自拼 URL 加载错误模型
+      if (live2dModelRef.current.url) {
+        live2d.loadModel();
+      }
 
       return () => {
         console.log('Live2D页面失去焦点');
@@ -319,6 +358,18 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       };
     }, [live2d.loadModel, live2d.unloadModel, lipSync.stop])
   );
+
+  // 角色切换后 modelUrl 变化时，页面已聚焦无法靠 useFocusEffect 触发，需单独监听
+  // 先显式 unload 再 load，确保 modelPath = undefined 这一帧被渲染，原生层 clearModel() 被调用
+  useEffect(() => {
+    if (!isPageFocused || !live2dModel.url) return;
+    live2d.unloadModel();
+    // 下一帧再 load，确保 unload 的 state 变化（modelPath = undefined）先渲染到原生层
+    const timer = setTimeout(() => {
+      live2d.loadModel();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [live2dModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== 初始化 MainManager =====
   useEffect(() => {
@@ -338,103 +389,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       console.log('🧹 主界面清理');
     };
   }, [audio.audioService, live2d.live2dService]);
-
-  // ===== 启动时从后端同步当前角色（仅一次） =====
-  const hasSyncedRef = useRef(false);
-
-  useEffect(() => {
-    const syncCurrentCharacter = async () => {
-      // 仅在首次连接时同步，避免重复
-      if (!audio.isConnected || hasSyncedRef.current) return;
-
-      try {
-        hasSyncedRef.current = true; // 标记已同步
-
-        const apiBase = `${buildHttpBaseURL(config)}/api`;
-        const client = createCharactersApiClient(apiBase);
-
-        // 🔥 从后端获取当前角色
-        const res = await client.getCurrentCatgirl();
-        const serverCurrentCatgirl = res.current_catgirl;
-
-        // 如果后端的当前角色与本地配置不一致，更新本地配置
-        if (serverCurrentCatgirl && serverCurrentCatgirl !== config.characterName) {
-          console.log(`🔄 检测到角色不一致，从后端同步: ${config.characterName} -> ${serverCurrentCatgirl}`);
-
-          // 更新本地配置
-          await applyQrRaw(JSON.stringify({
-            host: config.host,
-            port: config.port,
-            characterName: serverCurrentCatgirl,
-          }));
-
-          // 发送 start_session 重新加载 voice_id
-          setTimeout(() => {
-            if (audio.isConnected) {
-              console.log('📤 发送 start_session 以同步角色音色');
-              audio.sendMessage({
-                action: 'start_session',
-                input_type: 'text',
-                audio_format: 'PCM_48000HZ_MONO_16BIT',
-                new_session: false,
-              });
-            }
-          }, 500);
-        } else {
-          console.log(`✅ 角色已同步: ${config.characterName}`);
-        }
-      } catch (err: any) {
-        console.error('同步当前角色失败:', err);
-        hasSyncedRef.current = false; // 失败后重置，允许下次重试
-      }
-    };
-
-    syncCurrentCharacter();
-  }, [audio.isConnected]); // 🔥 只依赖 isConnected，避免循环
-
-  // ===== 验证配置的角色是否存在 =====
-  useEffect(() => {
-    const validateCharacter = async () => {
-      // 仅在首次连接时验证
-      if (!audio.isConnected) return;
-
-      try {
-        const apiBase = `${buildHttpBaseURL(config)}/api`;
-        const client = createCharactersApiClient(apiBase);
-        const data = await client.getCharacters();
-
-        const availableCharacters = Object.keys(data.猫娘 || {});
-
-        // 检查配置的角色是否存在
-        if (!data.猫娘[config.characterName]) {
-          console.warn(`⚠️ 角色 "${config.characterName}" 不存在`);
-
-          const firstAvailable = availableCharacters[0];
-
-          if (firstAvailable) {
-            Alert.alert(
-              '角色不存在',
-              `配置的角色 "${config.characterName}" 不存在。\n\n可用角色：${availableCharacters.join(', ')}\n\n请通过"角色管理"切换到有效角色。`,
-              [{ text: '知道了' }]
-            );
-          } else {
-            Alert.alert(
-              '无可用角色',
-              '服务器上没有任何角色，请先在 Web 端创建角色。',
-              [{ text: '知道了' }]
-            );
-          }
-        } else {
-          console.log(`✅ 角色验证通过: ${config.characterName}`);
-        }
-      } catch (err: any) {
-        console.error('验证角色失败:', err);
-        // 网络错误等不显示提示，避免打扰用户
-      }
-    };
-
-    validateCharacter();
-  }, [audio.isConnected, config, config.characterName]);
 
   useEffect(() => {
     console.log('live2d.live2dProps', live2d.live2dProps);
@@ -560,9 +514,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   }, [config]);
 
   const handleSwitchCharacter = useCallback(async (name: string) => {
-    // 🔥 设置角色切换标志，避免显示断开消息
-    isSwitchingCharacterRef.current = true;
-
     try {
       setCharacterLoading(true);
       const apiBase = `${buildHttpBaseURL(config)}/api`;
@@ -570,95 +521,22 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       const res = await client.setCurrentCatgirl(name);
 
       if (res.success) {
-        // 更新本地状态
-        setCurrentCatgirl(name);
         setCharacterModalVisible(false);
-
-        // 🔥 关键：更新 config.characterName 并重新建立连接
-        await applyQrRaw(JSON.stringify({
-          host: config.host,
-          port: config.port,
-          characterName: name,
-        }));
-
-        // 🔥 等待连接重建（分两阶段：等待断开 -> 等待重连 + AudioService 完全就绪）
-        const waitForConnection = (): Promise<boolean> => {
-          return new Promise((resolve) => {
-            let retryCount = 0;
-            const maxRetries = 10; // 10 * 500ms = 5s
-            let phase: 'waiting_disconnect' | 'waiting_connect' = 'waiting_disconnect';
-
-            const check = () => {
-              if (phase === 'waiting_disconnect') {
-                // 阶段1：等待旧连接断开（最多等待 1 秒）
-                if (!isConnectedRef.current || retryCount >= 2) {
-                  console.log('🔄 旧连接已断开，等待新连接...');
-                  phase = 'waiting_connect';
-                  retryCount = 0;
-                  setTimeout(check, 500);
-                } else {
-                  retryCount++;
-                  setTimeout(check, 500);
-                }
-              } else {
-                // 阶段2：等待新连接建立 + AudioService 完全就绪（包括初始化）
-                // 🔥 使用 isReadyRef 避免闭包引用问题
-                const isReady = audio.isReadyRef.current;
-
-                if (isReady) {
-                  console.log('✅ 新连接已建立且 AudioService 已完全初始化');
-                  resolve(true);
-                } else if (retryCount >= maxRetries) {
-                  console.log('❌ 等待连接超时');
-                  resolve(false);
-                } else {
-                  retryCount++;
-                  setTimeout(check, 500);
-                }
-              }
-            };
-            check();
-          });
-        };
-
-        const connected = await waitForConnection();
-
-        if (connected) {
-          // 发送 start_session 以重新加载 voice_id
-          console.log('📤 发送 start_session 以重新加载角色音色');
-          const message = {
-            action: 'start_session',
-            input_type: 'text',
-            audio_format: 'PCM_48000HZ_MONO_16BIT',
-            new_session: false,
-          };
-          console.log('📤 消息内容:', JSON.stringify(message));
-          audio.sendMessage(message);
-
-          console.log('✅ start_session 已调用');
-
-          Alert.alert('切换成功', `已切换到角色: ${name}\n\n新的语音已生效！`);
-        } else {
-          Alert.alert(
-            '切换成功',
-            `已切换到角色: ${name}\n\n但 WebSocket 连接建立失败，请检查网络后刷新页面。`,
-          );
-        }
+        // UI 更新由服务端广播的 catgirl_switched 消息统一驱动
       } else {
+        setCharacterLoading(false);
         Alert.alert('切换失败', res.error || '未知错误');
       }
     } catch (err: any) {
-      Alert.alert('切换失败', err.message || '网络错误');
-    } finally {
-      // 🔥 修复：延迟重置角色切换标志，给旧连接足够时间清理
-      // 旧 WebSocket 关闭时可能会延迟触发 error 事件，需要延迟重置标志
-      setTimeout(() => {
-        isSwitchingCharacterRef.current = false;
-        console.log('🔄 角色切换标志已重置');
-      }, 2000);  // 延迟 2 秒
       setCharacterLoading(false);
+      Alert.alert('切换失败', err.message || '网络错误');
     }
-  }, [config, applyQrRaw, audio]);
+  }, [config]);
+
+  // 手动打断 AI 播放
+  const handleInterrupt = useCallback(() => {
+    audio.clearAudioQueue();
+  }, [audio.clearAudioQueue]);
 
   // 确保 text session 已启动（与 Web 端一致的 Legacy 协议）
   const ensureTextSession = useCallback(async (): Promise<boolean> => {
@@ -668,13 +546,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     }
 
     if (!audio.isConnected) {
-      console.warn('⚠️ ensureTextSession: 未连接到服务器');
-      return false;
-    }
-
-    // 🔥 检查 AudioService 是否完全就绪（包括初始化完成）
-    if (!audio.audioService?.isReady()) {
-      console.warn('⚠️ ensureTextSession: AudioService 未完全就绪');
       return false;
     }
 
@@ -695,11 +566,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       sessionStartedResolverRef.current = resolve;
 
       // 发送 start_session（Legacy 协议）
-      console.log('📤 发送 start_session(input_type: text, audio_format: PCM_48000HZ_MONO_16BIT)');
+      console.log('📤 发送 start_session(input_type: text)');
       audio.sendMessage({
         action: 'start_session',
         input_type: 'text',
-        audio_format: 'PCM_48000HZ_MONO_16BIT',
         new_session: false,
       });
 
@@ -885,6 +755,21 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           connectionStatus={connectionStatus}
           onSendMessage={handleSendMessage}
           disabled={!audio.isConnected}
+          forceCollapsed={isChatForceCollapsed}
+          renderFloatingOverlay={() =>
+            audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode ? (
+              <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
+                <TouchableOpacity
+                  style={styles.interruptButton}
+                  onPress={handleInterrupt}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.interruptIcon}>■</Text>
+                  <Text style={styles.interruptLabel}>打断</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null
+          }
         />
       </View>
 
@@ -941,6 +826,19 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* 手动打断按钮：聊天面板收起时的绝对定位浮层（展开时由 renderFloatingOverlay 接管） */}
+      {isChatForceCollapsed && audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode && (
+        <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
+          <TouchableOpacity
+            style={styles.interruptButton}
+            onPress={handleInterrupt}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.interruptIcon}>■</Text>
+            <Text style={styles.interruptLabel}>打断</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -978,11 +876,40 @@ const styles = StyleSheet.create({
   },
   chatContainerWrapper: {
     position: 'absolute',
+    top: 0,
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 100,
     elevation: 100,
+    pointerEvents: 'box-none',
+  },
+  interruptButtonWrapper: {
+    position: 'absolute',
+    bottom: 100,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 200,
+    elevation: 200,
+  },
+  interruptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(220, 50, 50, 0.85)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    gap: 6,
+  },
+  interruptIcon: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  interruptLabel: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   characterModalOverlay: {
     flex: 1,

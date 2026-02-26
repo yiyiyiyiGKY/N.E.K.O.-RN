@@ -201,7 +201,14 @@ export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
           markLastMessageComplete('gemini');
           return { type: 'turn_end', fullText: getLastMessageText('gemini') };
         }
-        
+
+        else if (parsed.type === 'catgirl_switched') {
+          console.log('🔄 角色已切换，清空消息');
+          clearMessages();
+          const characterName: string | undefined = parsed.new_catgirl;
+          return { type: 'catgirl_switched', characterName };
+        }
+
         else {
           console.log('📋 其他类型消息:', parsed.type);
           return { type: 'other', data: parsed };
@@ -214,7 +221,7 @@ export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
     }
 
     return null;
-  }, [addMessage, appendToLastMessage, markLastMessageComplete, getLastMessageText]);
+  }, [addMessage, appendToLastMessage, markLastMessageComplete, getLastMessageText, clearMessages]);
 
   return {
     // 状态

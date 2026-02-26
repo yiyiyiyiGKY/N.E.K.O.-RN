@@ -50,6 +50,17 @@ export interface CurrentCatgirlResponse {
   current_catgirl: string;
 }
 
+export interface Live2dModelInfo {
+  name: string;
+  path: string;
+  item_id?: string;
+}
+
+export interface CurrentLive2dModelResponse {
+  success: boolean;
+  model_info?: Live2dModelInfo;
+}
+
 // ==================== Client Factory ====================
 
 // Noop token storage for unauthenticated requests
@@ -141,6 +152,16 @@ export function createCharactersApiClient(apiBase: string) {
      */
     async setCurrentCatgirl(catgirlName: string): Promise<ApiResponse> {
       return client.post('/characters/current_catgirl', { catgirl_name: catgirlName });
+    },
+
+    /**
+     * Get Live2D model info for a catgirl
+     * GET /api/characters/current_live2d_model?catgirl_name={name}
+     */
+    async getCurrentLive2dModel(catgirlName: string): Promise<CurrentLive2dModelResponse> {
+      return client.get('/characters/current_live2d_model', {
+        params: { catgirl_name: catgirlName },
+      });
     },
   };
 }

@@ -25,6 +25,8 @@ export interface Live2DServiceConfig {
   backendPort: number;
   backendScheme?: 'http' | 'https';
   live2dPath?: string;
+  /** 若提供，直接使用该 URL 作为 model3.json 远端地址，跳过自动拼接 */
+  modelUrl?: string;
   onModelLoaded?: () => void;
   onModelError?: (error: string) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;
@@ -345,7 +347,8 @@ export class Live2DService {
       return;
     }
 
-    const remoteModelUrl = `${this.modelBaseUrl}/${this.config.modelName}.model3.json`;
+    const remoteModelUrl = this.config.modelUrl
+      ?? `${this.modelBaseUrl}/${this.config.modelName}.model3.json`;
     await this.core.loadModel({ uri: remoteModelUrl, source: 'url', id: this.config.modelName });
   }
 
@@ -521,10 +524,17 @@ export class Live2DService {
   destroy(): void {
     console.log('🧹 Live2DService 销毁中...');
 
-    // 卸载模型
-    if (this.modelState.isReady) {
-      this.unloadModel();
-    }
+    // 先清空所有回调，防止 unloadModel/dispose 触发的异步状态事件
+    // 污染新 service 的 React state（覆盖掉 useLive2D 的 reset）
+    this.config.onModelStateChange = undefined;
+    this.config.onLoadingStateChange = undefined;
+    this.config.onTransformStateChange = undefined;
+    this.config.onAnimationStateChange = undefined;
+    this.config.onModelLoaded = undefined;
+    this.config.onModelError = undefined;
+
+    // 无论 isReady/isLoading 状态，都强制卸载，避免旧模型残留
+    this.unloadModel();
 
     // 重置状态
     this.isInitialized = false;
