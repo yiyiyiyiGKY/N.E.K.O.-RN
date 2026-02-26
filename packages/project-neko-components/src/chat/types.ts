@@ -85,4 +85,10 @@ export interface ChatContainerProps {
    * 用于在 Modal 展开态内部渲染浮动元素（如打断按钮），使其能显示在聊天面板上方
    */
   renderFloatingOverlay?: () => React.ReactNode;
+
+  /**
+   * 强制折叠聊天面板（RN 专用，受控）
+   * 为 true 时立即关闭展开态，回到浮动按钮
+   */
+  forceCollapsed?: boolean;
 }

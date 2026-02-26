@@ -107,8 +107,9 @@ export default function ChatContainer({
   connectionStatus = 'idle',
   disabled = false,
   statusText,
-  cameraEnabled = false, // 相机功能默认禁用，需要集成 react-native-image-picker 后启用
+  cameraEnabled = false,
   renderFloatingOverlay,
+  forceCollapsed,
 }: ChatContainerProps = {}) {
   const t = useT();
 
@@ -180,6 +181,13 @@ export default function ChatContainer({
       keyboardDidShowListener.remove();
     };
   }, [collapsed, scrollToBottom]);
+
+  // 远端强制折叠
+  useEffect(() => {
+    if (forceCollapsed) {
+      setCollapsed(true);
+    }
+  }, [forceCollapsed, setCollapsed]);
 
   // 初始化欢迎消息（仅非受控模式）
   React.useEffect(() => {

@@ -43,7 +43,17 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [characterList, setCharacterList] = useState<string[]>([]);
   const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
-  const { config, applyQrRaw } = useDevConnectionConfig();
+  const [isChatForceCollapsed, setIsChatForceCollapsed] = useState(false);
+  const isSwitchingCharacterRef = useRef(false);
+  // 合并为单一对象，确保 modelName 和 modelUrl 同步更新，避免两次 setState 触发两次 useLive2D effect
+  const [live2dModel, setLive2dModel] = useState<{ name: string; url: string | undefined }>({
+    name: 'mao_pro',
+    url: undefined,
+  });
+  // ref 持有最新值，供 useFocusEffect 闭包读取（避免 stale closure）
+  const live2dModelRef = useRef(live2dModel);
+  live2dModelRef.current = live2dModel;
+  const { config, setConfig, applyQrRaw } = useDevConnectionConfig();
   const params = useLocalSearchParams<{
     qr?: string;
     host?: string;
@@ -92,6 +102,45 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       }
     });
   }, [applyQrRaw, params.characterName, params.host, params.name, params.port, params.qr]);
+
+  // 从后端获取角色对应的 Live2D 模型信息并更新状态
+  const syncLive2dModel = useCallback(async (catgirlName: string) => {
+    try {
+      const apiBase = `${buildHttpBaseURL(config)}/api`;
+      const client = createCharactersApiClient(apiBase);
+      const modelRes = await client.getCurrentLive2dModel(catgirlName);
+      if (modelRes.success && modelRes.model_info) {
+        setLive2dModel({
+          name: modelRes.model_info.name,
+          url: `${buildHttpBaseURL(config)}${modelRes.model_info.path}`,
+        });
+      }
+    } catch (e) {
+      console.warn('[syncLive2dModel] 获取模型信息失败:', e);
+    }
+  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 启动时从服务端获取当前角色，以服务端为准
+  useEffect(() => {
+    const syncCurrentCatgirl = async () => {
+      try {
+        const apiBase = `${buildHttpBaseURL(config)}/api`;
+        const client = createCharactersApiClient(apiBase);
+        const res = await client.getCurrentCatgirl();
+        if (res.current_catgirl) {
+          setCurrentCatgirl(res.current_catgirl);
+          if (config.characterName !== res.current_catgirl) {
+            await setConfig({ ...config, characterName: res.current_catgirl });
+          }
+          await syncLive2dModel(res.current_catgirl);
+        }
+      } catch {
+        // 网络不通时降级：用本地缓存初始化 UI
+        if (config.characterName) setCurrentCatgirl(config.characterName);
+      }
+    };
+    syncCurrentCatgirl();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 工具栏状态管理（与 Web 版本一致）
   const [isMobile, setIsMobile] = useState(true); // RN 默认为移动端
@@ -233,11 +282,25 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         mainManager.onUserSpeechDetected();
       } else if (result?.type === 'turn_end') {
         mainManager.onTurnEnd(result.fullText);
+      } else if (result?.type === 'catgirl_switched' && result.characterName) {
+        // 本地和远端切换统一由此处驱动
+        setIsChatForceCollapsed(true);
+        setCharacterLoading(true);
+        isSwitchingCharacterRef.current = true;
+        setCurrentCatgirl(result.characterName);
+        await setConfig({ ...config, characterName: result.characterName });
+        await syncLive2dModel(result.characterName);
       }
     },
     onConnectionChange: (connected) => {
       if (connected) {
         chat.addMessage('已连接到服务器', 'system');
+        if (isSwitchingCharacterRef.current) {
+          isSwitchingCharacterRef.current = false;
+          setCharacterLoading(false);
+          setIsChatForceCollapsed(false);
+          Alert.alert('切换成功', `已切换到角色: ${config.characterName}`);
+        }
       } else {
         chat.addMessage('与服务器断开连接', 'system');
         // 连接断开时重置 text session 状态
@@ -250,9 +313,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const connectionStatus: ConnectionStatus = audio.isConnected ? 'open' : 'closed';
 
   const live2d = useLive2D({
-    modelName: 'mao_pro',
+    modelName: live2dModel.name,
+    modelUrl: live2dModel.url,
     backendHost: config.host,
-    backendPort: 8081,
+    backendPort: config.port,
     // 由页面 focus 生命周期触发加载；避免 autoLoad + focus 双重触发导致重复加载
     autoLoad: false,
     // TODO: 集成 preferences repository 到 useLive2D hook
@@ -273,9 +337,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       // 设置页面为焦点状态
       setIsPageFocused(true);
 
-      // 页面获得焦点时触发模型加载（若已在加载/已就绪，Service 内部会自动去重）
-      // 这里放在 focus 生命周期里，确保从其它 Tab 返回时也能恢复模型显示
-      live2d.loadModel();
+      // 只有 url 已就绪（syncLive2dModel 完成后）才触发加载
+      // 避免启动时 url 还是 undefined，回退到自拼 URL 加载错误模型
+      if (live2dModelRef.current.url) {
+        live2d.loadModel();
+      }
 
       return () => {
         console.log('Live2D页面失去焦点');
@@ -292,6 +358,18 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       };
     }, [live2d.loadModel, live2d.unloadModel, lipSync.stop])
   );
+
+  // 角色切换后 modelUrl 变化时，页面已聚焦无法靠 useFocusEffect 触发，需单独监听
+  // 先显式 unload 再 load，确保 modelPath = undefined 这一帧被渲染，原生层 clearModel() 被调用
+  useEffect(() => {
+    if (!isPageFocused || !live2dModel.url) return;
+    live2d.unloadModel();
+    // 下一帧再 load，确保 unload 的 state 变化（modelPath = undefined）先渲染到原生层
+    const timer = setTimeout(() => {
+      live2d.loadModel();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [live2dModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== 初始化 MainManager =====
   useEffect(() => {
@@ -443,16 +521,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       const res = await client.setCurrentCatgirl(name);
 
       if (res.success) {
-        setCurrentCatgirl(name);
         setCharacterModalVisible(false);
-        Alert.alert('切换成功', `已切换到角色: ${name}`);
+        // UI 更新由服务端广播的 catgirl_switched 消息统一驱动
       } else {
+        setCharacterLoading(false);
         Alert.alert('切换失败', res.error || '未知错误');
       }
     } catch (err: any) {
-      Alert.alert('切换失败', err.message || '网络错误');
-    } finally {
       setCharacterLoading(false);
+      Alert.alert('切换失败', err.message || '网络错误');
     }
   }, [config]);
 
@@ -678,6 +755,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           connectionStatus={connectionStatus}
           onSendMessage={handleSendMessage}
           disabled={!audio.isConnected}
+          forceCollapsed={isChatForceCollapsed}
           renderFloatingOverlay={() =>
             audio.audioStats.isPlaying && audio.isConnected && !toolbarGoodbyeMode ? (
               <View style={styles.interruptButtonWrapper} pointerEvents="box-none">
@@ -798,11 +876,13 @@ const styles = StyleSheet.create({
   },
   chatContainerWrapper: {
     position: 'absolute',
+    top: 0,
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 100,
     elevation: 100,
+    pointerEvents: 'box-none',
   },
   interruptButtonWrapper: {
     position: 'absolute',
