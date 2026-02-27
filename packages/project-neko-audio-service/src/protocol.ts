@@ -24,9 +24,14 @@ export class SpeechInterruptController {
 
   /**
    * user_activity: 清空播放队列但不重置解码器；等待新 speech_id 再重置。
+   *
+   * 注意：这里故意不记录 interruptedSpeechId。
+   * 服务端文本模式下 speech_id 生成和 user_activity 发送顺序有 bug
+   * （先生成新 ID 再发 user_activity，导致 interrupted_speech_id === 新音频的 speech_id），
+   * 如果记录了就会把新音频也丢弃。打断效果由 stopPlayback() + manualInterruptActive 保证。
    */
-  onUserActivity(interruptedSpeechId?: string | null): SpeechInterruptDecision[] {
-    this.interruptedSpeechId = interruptedSpeechId || null;
+  onUserActivity(_interruptedSpeechId?: string | null): SpeechInterruptDecision[] {
+    // 不记录 interruptedSpeechId，避免文本模式下新音频被误丢弃
     this.pendingDecoderReset = true;
     this.skipNextBinary = false;
     return [{ kind: "noop" }];
