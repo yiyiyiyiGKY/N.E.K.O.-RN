@@ -411,8 +411,25 @@ export class Live2DService {
    * 设置位置
    */
   setPosition(x: number, y: number): void {
-    console.log('📍 设置位置:', x, y);
-    void this.core.setTransform({ position: { x, y } } as Transform);
+    console.log('📍 [Live2DService] setPosition:', x, y);
+    // 直接调用 native module，不走 setTransform → React 重渲染链路
+    // 避免每帧拖动触发 live2dProps 重建导致模型消失
+    try {
+      if (typeof ReactNativeLive2dModule.setViewPosition === 'function') {
+        ReactNativeLive2dModule.setViewPosition(x, y);
+        console.log('✅ [Live2DService] setViewPosition called successfully');
+      } else {
+        console.error('❌ [Live2DService] setViewPosition is not a function');
+        // Fallback: 使用旧的 setTransform 方法
+        void this.core.setTransform({ position: { x, y } } as Transform);
+      }
+    } catch (e) {
+      console.error('❌ [Live2DService] setViewPosition error:', e);
+      // Fallback: 使用旧的 setTransform 方法
+      void this.core.setTransform({ position: { x, y } } as Transform);
+    }
+    // 同步更新内部状态，供 getTransformState() 读取
+    this.transformState.position = { x, y };
   }
 
   /**
