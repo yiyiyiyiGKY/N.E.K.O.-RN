@@ -306,6 +306,8 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         mainManager.onTurnEnd(result.fullText);
       } else if (result?.type === 'catgirl_switched' && result.characterName) {
         // 本地和远端切换统一由此处驱动
+        // 立即停止旧角色的音频播放，防止切换后还听到旧角色的声音
+        audio.clearAudioQueue();
         setIsChatForceCollapsed(true);
         setCharacterLoading(true);
         isSwitchingCharacterRef.current = true;
@@ -592,6 +594,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       return false;
     }
 
+    // 如果当前正在录音（语音模式），先停止录音并等待服务端清理旧 session，
+    // 避免 start_session(text) 与正在启动/活跃的 audio session 产生竞态
+    if (audio.isRecording) {
+      console.log('🔄 检测到正在录音，先停止录音再切换到文本模式');
+      await audio.toggleRecording();
+      // 给服务端一点时间完成 end_session 清理
+      await new Promise(r => setTimeout(r, 500));
+    }
+
     // 如果已经有一个正在进行的 session 请求，复用该 Promise
     // 这样并发调用会共享同一个 Promise，避免 resolver 被覆盖导致早期 Promise 永不 resolve
     if (pendingSessionPromiseRef.current) {
@@ -631,7 +642,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
     pendingSessionPromiseRef.current = promise;
     return promise;
-  }, [isTextSessionActive, audio.isConnected, audio.sendMessage]);
+  }, [isTextSessionActive, audio.isConnected, audio.isRecording, audio.sendMessage, audio.toggleRecording]);
 
   // 处理用户发送消息（文本 + 可选图片）
   // 使用 stream_data action 和 clientMessageId 与 N.E.K.O 协议一致
