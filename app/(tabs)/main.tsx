@@ -9,6 +9,7 @@ import { useLive2D } from '@/hooks/useLive2D';
 import { useLive2DAgentBackend } from '@/hooks/useLive2DAgentBackend';
 import { useLive2DPreferences } from '@/hooks/useLive2DPreferences';
 import { mainManager } from '@/utils/MainManager';
+import { VoicePrepareOverlay } from '@/components/VoicePrepareOverlay';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -44,6 +45,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
   const [isChatForceCollapsed, setIsChatForceCollapsed] = useState(false);
+  const [voicePrepareStatus, setVoicePrepareStatus] = useState<'preparing' | 'ready' | null>(null);
   const isSwitchingCharacterRef = useRef(false);
   // 合并为单一对象，确保 modelName 和 modelUrl 同步更新，避免两次 setState 触发两次 useLive2D effect
   const [live2dModel, setLive2dModel] = useState<{ name: string; url: string | undefined }>({
@@ -493,10 +495,18 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     onAgentChange(id, next);
   }, [onAgentChange]);
 
-  const handleToggleMic = useCallback((next: boolean) => {
+  const handleToggleMic = useCallback(async (next: boolean) => {
     setToolbarMicEnabled(next);
     if (next) {
-      mainManager.startRecording();
+      setVoicePrepareStatus('preparing');
+      try {
+        await mainManager.startRecording();
+        setVoicePrepareStatus('ready');
+        setTimeout(() => setVoicePrepareStatus(null), 800);
+      } catch {
+        setVoicePrepareStatus(null);
+        setToolbarMicEnabled(false);
+      }
     } else {
       mainManager.stopRecording();
       // 语音会话停止后，重置 text session 状态
@@ -813,6 +823,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           forceCollapsed={isChatForceCollapsed}
         />
       </View>
+
+      {/* 语音准备状态遮罩 */}
+      <VoicePrepareOverlay status={voicePrepareStatus} />
 
       {/* 角色选择 Modal */}
       <Modal
