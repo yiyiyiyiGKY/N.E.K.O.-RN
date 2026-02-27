@@ -253,10 +253,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       if (parsedMsg?.type === 'session_started') {
         const inputMode = parsedMsg.input_mode as string | undefined;
         console.log('✅ 收到 session_started，input_mode:', inputMode);
-        // 只有 text 会话才设置 isTextSessionActive
-        // audio 会话由 audio-service 管理，不影响 text session 状态
         if (inputMode === 'text') {
           setIsTextSessionActive(true);
+        } else if (inputMode === 'audio') {
+          // audio session 启动意味着 text session 已被替换，重置状态
+          setIsTextSessionActive(false);
         }
         if (sessionTimeoutRef.current) {
           clearTimeout(sessionTimeoutRef.current);
@@ -283,6 +284,13 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           sessionStartedResolverRef.current = null;
         }
         pendingSessionPromiseRef.current = null;
+        return;
+      }
+
+      // 处理 session_ended_by_server 事件（服务端主动终止 session，如 API 断连）
+      if (parsedMsg?.type === 'session_ended_by_server') {
+        console.log('⚠️ 收到 session_ended_by_server，input_mode:', parsedMsg.input_mode);
+        setIsTextSessionActive(false);
         return;
       }
 
