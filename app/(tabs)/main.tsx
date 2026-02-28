@@ -12,12 +12,14 @@ import { mainManager } from '@/utils/MainManager';
 import { VoicePrepareOverlay } from '@/components/VoicePrepareOverlay';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Dimensions, Modal, Platform, ScrollView,
+  ActivityIndicator,
+  Alert, Dimensions, Image, Modal, Platform, ScrollView,
   StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View,
 } from 'react-native';
 import { ReactNativeLive2dView } from 'react-native-live2d';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
   Live2DRightToolbar,
   ChatContainer,
@@ -29,6 +31,15 @@ import {
 } from '@project_neko/components';
 
 type MainUIScreenProps = {}
+
+// 边界保护：逻辑视图范围为 ±1.0，设置为 0.9 确保模型始终大部分在屏幕内
+const POSITION_LIMIT = 0.9;
+const clampPos = (v: number) => Math.max(-POSITION_LIMIT, Math.min(POSITION_LIMIT, v));
+
+// 缩放范围限制
+const SCALE_MIN = 0.3;
+const SCALE_MAX = 2.0;
+const clampScale = (v: number) => Math.max(SCALE_MIN, Math.min(SCALE_MAX, v));
 
 // 生成消息 ID
 function generateMessageId(counter: number): string {
@@ -44,6 +55,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [characterList, setCharacterList] = useState<string[]>([]);
   const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
+  const [switchedCharacterName, setSwitchedCharacterName] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const switchedNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const switchErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const characterLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isChatForceCollapsed, setIsChatForceCollapsed] = useState(false);
   const [voicePrepareStatus, setVoicePrepareStatus] = useState<'preparing' | 'ready' | null>(null);
   const isSwitchingCharacterRef = useRef(false);
@@ -52,6 +68,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     name: 'mao_pro',
     url: undefined,
   });
+  // ref 持有最新 currentCatgirl，供 onConnectionChange 闭包安全读取（避免 stale closure）
+  const currentCatgirlRef = useRef<string | null>(null);
+  currentCatgirlRef.current = currentCatgirl;
   // ref 持有最新值，供 useFocusEffect 闭包读取（避免 stale closure）
   const live2dModelRef = useRef(live2dModel);
   live2dModelRef.current = live2dModel;
@@ -307,6 +326,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       } else if (result?.type === 'turn_end') {
         mainManager.onTurnEnd(result.fullText);
       } else if (result?.type === 'catgirl_switched' && result.characterName) {
+        // 幂等保护：如果已在切换中且目标角色相同，跳过重复处理
+        if (isSwitchingCharacterRef.current && currentCatgirlRef.current === result.characterName) {
+          console.log('🔄 [catgirl_switched] 已在切换中，跳过重复处理');
+          return;
+        }
+
+        // 检查是否需要触发 WebSocket 重连
+        const needsReconnect = config.characterName !== result.characterName;
+
         // 本地和远端切换统一由此处驱动
         // 立即停止旧角色的音频播放，防止切换后还听到旧角色的声音
         audio.clearAudioQueue();
@@ -318,6 +346,46 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         setIsTextSessionActive(false);
         await setConfig({ ...config, characterName: result.characterName });
         await syncLive2dModel(result.characterName);
+
+        // 如果 config.characterName 已经等于新角色名，useAudio effect 不会重新运行
+        // 需要手动发送 start_session 并完成切换
+        if (!needsReconnect) {
+          console.log('📤 [catgirl_switched] config 未变化，手动完成切换');
+          // 清除 handleSwitchCharacter 设置的超时 timer
+          if (characterLoadingTimerRef.current) {
+            clearTimeout(characterLoadingTimerRef.current);
+            characterLoadingTimerRef.current = null;
+          }
+          // 直接发送 start_session
+          audio.sendMessage({
+            action: 'start_session',
+            input_type: 'text',
+            audio_format: 'PCM_48000HZ_MONO_16BIT',
+            new_session: false,
+          });
+          // 立即完成切换
+          isSwitchingCharacterRef.current = false;
+          setCharacterLoading(false);
+          setIsChatForceCollapsed(false);
+          setSwitchedCharacterName(result.characterName);
+          if (switchedNameTimerRef.current) clearTimeout(switchedNameTimerRef.current);
+          switchedNameTimerRef.current = setTimeout(() => setSwitchedCharacterName(null), 2500);
+          return;
+        }
+
+        // 超时保护：15 秒内若未收到 onConnectionChange(true)，自动解除所有切换状态
+        // 仅在 timer 未设置时才设置，避免覆盖 handleSwitchCharacter 设置的 timer
+        if (!characterLoadingTimerRef.current) {
+          characterLoadingTimerRef.current = setTimeout(() => {
+            setCharacterLoading(false);
+            setIsChatForceCollapsed(false);
+            isSwitchingCharacterRef.current = false;
+            characterLoadingTimerRef.current = null;
+            setSwitchError('连接超时，角色切换失败');
+            if (switchErrorTimerRef.current) clearTimeout(switchErrorTimerRef.current);
+            switchErrorTimerRef.current = setTimeout(() => setSwitchError(null), 3000);
+          }, 15000);
+        }
       }
     },
     onConnectionChange: (connected) => {
@@ -334,15 +402,20 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           });
           console.log('✅ start_session 已调用');
 
-          // 延迟重置角色切换标志，给旧连接足够时间清理
-          // 旧 WebSocket 关闭时可能会延迟触发 error 事件，需要延迟重置标志
-          setTimeout(() => {
-            isSwitchingCharacterRef.current = false;
-            console.log('🔄 角色切换标志已重置');
-          }, 2000);  // 延迟 2 秒
+          // 立即重置角色切换标志，避免后续消息重复触发超时
+          isSwitchingCharacterRef.current = false;
+          console.log('🔄 角色切换标志已重置');
           setCharacterLoading(false);
           setIsChatForceCollapsed(false);
-          Alert.alert('切换成功', `已切换到角色: ${config.characterName}\n\n新的语音已生效！`);
+          // 清除超时保护 timer
+          if (characterLoadingTimerRef.current) {
+            clearTimeout(characterLoadingTimerRef.current);
+            characterLoadingTimerRef.current = null;
+          }
+          const name = currentCatgirlRef.current;
+          setSwitchedCharacterName(name);
+          if (switchedNameTimerRef.current) clearTimeout(switchedNameTimerRef.current);
+          switchedNameTimerRef.current = setTimeout(() => setSwitchedCharacterName(null), 2500);
         }
       } else {
         chat.addMessage('与服务器断开连接', 'system');
@@ -486,6 +559,88 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     mainManager.onLive2DTap();
   }, []);
 
+  // 双指长按拖动状态
+  const dragStartPositionRef = useRef<{ x: number; y: number } | null>(null);
+  // 使用独立 ref 跟踪当前位置，不依赖 React 状态（因为 setPosition 不会触发 React 更新）
+  const currentModelPositionRef = useRef({ x: 0, y: 0 });
+  const [isDraggingModel, setIsDraggingModel] = useState(false);
+
+  // 双指缩放状态
+  const startScaleRef = useRef<number>(0.8);
+  const currentScaleRef = useRef<number>(0.8);
+  const [isScalingModel, setIsScalingModel] = useState(false);
+
+  // 拖动手势
+  const dragGesture = useMemo(() => {
+    let screenWidth = 1;
+    let screenHeight = 1;
+    return Gesture.Pan()
+      .minPointers(2)
+      .activateAfterLongPress(500)
+      .runOnJS(true)
+      .onStart(() => {
+        const { width, height } = Dimensions.get('window');
+        screenWidth = width;
+        screenHeight = height;
+        // 使用持久化的位置 ref，而不是 React 状态
+        const pos = { ...currentModelPositionRef.current };
+        if (Math.abs(pos.x) > POSITION_LIMIT || Math.abs(pos.y) > POSITION_LIMIT) {
+          live2d.setModelPosition(0, 0);
+          currentModelPositionRef.current = { x: 0, y: 0 };
+          pos.x = 0;
+          pos.y = 0;
+        }
+        dragStartPositionRef.current = pos;
+        setIsDraggingModel(true);
+      })
+      .onUpdate((e) => {
+        const start = dragStartPositionRef.current;
+        if (!start) return;
+        // 大幅降低灵敏度：手指移动整个屏幕距离，模型仅移动 0.005 个逻辑单位
+        // 乘数越小灵敏度越低，0.005 = 低灵敏度（需要大幅度拖动才能移动模型）
+        const sensitivity = 0.005;
+        const newX = clampPos(start.x + (e.translationX / screenWidth) * sensitivity);
+        const newY = clampPos(start.y - (e.translationY / screenHeight) * sensitivity);
+        // 更新当前位置 ref，供下次拖动使用
+        currentModelPositionRef.current = { x: newX, y: newY };
+        live2d.setModelPosition(newX, newY);
+      })
+      .onFinalize(() => {
+        // 拖动结束时，保存最终位置到 ref（从 dragStartPositionRef 计算最终位置）
+        // 这样下次拖动时可以从上次结束的位置开始
+        dragStartPositionRef.current = null;
+        setIsDraggingModel(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 双指缩放手势（捏合/张开）
+  const pinchGesture = useMemo(() => {
+    return Gesture.Pinch()
+      .runOnJS(true)
+      .onStart(() => {
+        // 记录开始时的缩放值
+        startScaleRef.current = currentScaleRef.current;
+        setIsScalingModel(true);
+      })
+      .onUpdate((e) => {
+        // 降低缩放灵敏度：缩放因子变化更平缓
+        const scaleSensitivity = 0.5;
+        const newScale = clampScale(startScaleRef.current * (1 + (e.scale - 1) * scaleSensitivity));
+        currentScaleRef.current = newScale;
+        live2d.setModelScale(newScale);
+      })
+      .onFinalize(() => {
+        setIsScalingModel(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 组合手势：同时支持拖动和缩放
+  const live2dGesture = useMemo(() => {
+    return Gesture.Simultaneous(dragGesture, pinchGesture);
+  }, [dragGesture, pinchGesture]);
+
   // 工具栏事件处理（与 Web 版本一致）
   const handleToolbarSettingsChange = useCallback((id: Live2DSettingsToggleId, next: boolean) => {
     setToolbarSettings((prev) => ({ ...prev, [id]: next }));
@@ -583,6 +738,17 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       if (res.success) {
         setCharacterModalVisible(false);
         // UI 更新由服务端广播的 catgirl_switched 消息统一驱动
+        // 超时保护：15 秒内若未收到 onConnectionChange(true)，自动解除所有切换状态
+        if (characterLoadingTimerRef.current) clearTimeout(characterLoadingTimerRef.current);
+        characterLoadingTimerRef.current = setTimeout(() => {
+          setCharacterLoading(false);
+          setIsChatForceCollapsed(false);
+          isSwitchingCharacterRef.current = false;
+          characterLoadingTimerRef.current = null;
+          setSwitchError('连接超时，角色切换失败');
+          if (switchErrorTimerRef.current) clearTimeout(switchErrorTimerRef.current);
+          switchErrorTimerRef.current = setTimeout(() => setSwitchError(null), 3000);
+        }, 15000);
       } else {
         setCharacterLoading(false);
         Alert.alert('切换失败', res.error || '未知错误');
@@ -722,6 +888,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     };
   }, []);
 
+  // 清理切换相关 timer，防止组件卸载后 setState
+  useEffect(() => {
+    return () => {
+      if (switchedNameTimerRef.current) clearTimeout(switchedNameTimerRef.current);
+      if (switchErrorTimerRef.current) clearTimeout(switchErrorTimerRef.current);
+      if (characterLoadingTimerRef.current) clearTimeout(characterLoadingTimerRef.current);
+    };
+  }, []);
+
   // 显示 Agent 状态（调试用）
   useEffect(() => {
     console.log('🤖 Agent 状态:', agent.statusText, {
@@ -744,12 +919,25 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
             onTap={handleLive2DTap}
           />
         )}
-        
+
         {/* 失去焦点时的显示 */}
         {!isPageFocused && (
           <View style={styles.pausedContainer}>
             <Text style={styles.pausedText}>
               {live2d.live2dProps.modelPath ? 'Live2D 已暂停' : '页面未激活'}
+            </Text>
+          </View>
+        )}
+
+        {/* 手势层：覆盖在 Live2D View 之上，不设 pointerEvents（默认 auto） */}
+        <GestureDetector gesture={live2dGesture}>
+          <View style={StyleSheet.absoluteFill} />
+        </GestureDetector>
+
+        {(isDraggingModel || isScalingModel) && (
+          <View style={styles.dragIndicator} pointerEvents="none">
+            <Text style={styles.dragIndicatorText}>
+              {isDraggingModel && isScalingModel ? '拖动/缩放中' : isDraggingModel ? '拖动中' : '缩放中'}
             </Text>
           </View>
         )}
@@ -838,11 +1026,21 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           <View style={styles.characterModalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.characterModalContent}>
-                <Text style={styles.characterModalTitle}>选择角色</Text>
+                {/* Header — 对应 neko-header 蓝色背景 */}
+                <View style={styles.characterModalHeader}>
+                  <Text style={styles.characterModalTitle}>角色管理</Text>
+                  <TouchableOpacity
+                    style={styles.characterModalCloseBtn}
+                    onPress={() => setCharacterModalVisible(false)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.characterModalCloseBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
                 <Text style={styles.characterModalSubtitle}>
-                  当前: {currentCatgirl || '未设置'}
+                  <Text style={styles.characterModalSubtitleLabel}>当前: </Text><Text style={styles.characterModalSubtitleHighlight}>{currentCatgirl || '未设置'}</Text>
                 </Text>
-                <ScrollView style={styles.characterModalList}>
+                <ScrollView style={styles.characterModalList} showsVerticalScrollIndicator={false}>
                   {characterList.map((name) => {
                     const isCurrent = name === currentCatgirl;
                     return (
@@ -853,32 +1051,58 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
                           isCurrent && styles.characterModalItemCurrent,
                         ]}
                         disabled={isCurrent || characterLoading}
+                        activeOpacity={0.7}
                         onPress={() => handleSwitchCharacter(name)}
                       >
+                        <Image
+                          source={require('@/assets/icons/dropdown_arrow.png')}
+                          style={styles.characterModalItemIcon}
+                        />
                         <Text style={[
                           styles.characterModalItemText,
                           isCurrent && styles.characterModalItemTextCurrent,
                         ]}>
-                          {isCurrent ? `✓ ${name}` : name}
+                          {name}
                         </Text>
-                        {isCurrent && (
-                          <Text style={styles.characterModalBadge}>当前</Text>
+                        {isCurrent ? (
+                          <View style={styles.characterModalBadgeWrap}>
+                            <Text style={styles.characterModalBadge}>当前</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.characterModalBadgePlaceholder} />
                         )}
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
-                <TouchableOpacity
-                  style={styles.characterModalClose}
-                  onPress={() => setCharacterModalVisible(false)}
-                >
-                  <Text style={styles.characterModalCloseText}>取消</Text>
-                </TouchableOpacity>
+                <Text style={styles.characterModalSubtitle2}></Text>
               </View>
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* 角色切换全屏加载遮罩 */}
+      {characterLoading && (
+        <View style={styles.switchingOverlay}>
+          <ActivityIndicator size="large" color="#40c5f1" />
+          <Text style={styles.switchingText}>正在切换角色...</Text>
+        </View>
+      )}
+
+      {/* 切换成功提示条 */}
+      {switchedCharacterName !== null && (
+        <View style={styles.switchingSuccessBanner} pointerEvents="none">
+          <Text style={styles.switchingSuccessText}>已切换为 {switchedCharacterName}</Text>
+        </View>
+      )}
+
+      {/* 切换失败提示条 */}
+      {switchError !== null && (
+        <View style={styles.switchingErrorBanner} pointerEvents="none">
+          <Text style={styles.switchingErrorText}>{switchError}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -908,6 +1132,22 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 16,
   },
+  dragIndicator: {
+    position: 'absolute',
+    top: 16,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(64, 197, 241, 0.25)',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(64, 197, 241, 0.6)',
+    zIndex: 10,
+  },
+  dragIndicatorText: {
+    color: '#40c5f1',
+    fontSize: 13,
+  },
   toolbarContainer: {
     position: 'absolute',
     right: 0,
@@ -926,68 +1166,167 @@ const styles = StyleSheet.create({
   },
   characterModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   characterModalContent: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 12,
-    padding: 20,
-    width: '80%',
-    maxHeight: '60%',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    overflow: 'hidden',
+    width: '82%',
+    maxHeight: '65%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.3,
+    shadowRadius: 30,
+    elevation: 20,
+  },
+  characterModalHeader: {
+    backgroundColor: '#40C5F1',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  characterModalCloseBtn: {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    marginTop: -10,
+  },
+  characterModalCloseBtnText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '400',
+    lineHeight: 20,
   },
   characterModalTitle: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 18,
     fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
+    letterSpacing: 1,
   },
   characterModalSubtitle: {
-    color: '#888',
+    color: '#666',
     fontSize: 13,
     textAlign: 'center',
-    marginBottom: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+    characterModalSubtitle2: {
+    color: '#666',
+    fontSize: 6,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 6,
+    paddingHorizontal: 10,
+  },
+  characterModalSubtitleLabel: {
+    color: '#40C5F1',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  characterModalSubtitleHighlight: {
+    color: '#40C5F1',
+    fontWeight: '600',
   },
   characterModalList: {
     maxHeight: 300,
+    paddingHorizontal: 16,
+    paddingBottom: 4,
   },
   characterModalItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 13,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    marginBottom: 8,
+    backgroundColor: '#f0f8ff',
+    borderWidth: 2,
+    borderColor: '#b3e5fc',
+    borderLeftWidth: 4,
+    borderLeftColor: '#40C5F1',
   },
   characterModalItemCurrent: {
-    backgroundColor: 'rgba(64, 197, 241, 0.15)',
-    borderWidth: 1,
+    backgroundColor: '#e3f4ff',
     borderColor: '#40C5F1',
+    borderLeftColor: '#22b3ff',
+  },
+  characterModalItemIcon: {
+    width: 18,
+    height: 18,
+    marginRight: 10,
+    transform: [{ rotate: '-90deg' }],
+    tintColor: '#40C5F1',
   },
   characterModalItemText: {
-    color: '#fff',
+    flex: 1,
+    color: '#40C5F1',
     fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   characterModalItemTextCurrent: {
-    color: '#40C5F1',
-    fontWeight: '600',
+    color: '#22b3ff',
+    fontWeight: '700',
+  },
+  characterModalBadgeWrap: {
+    backgroundColor: '#40C5F1',
+    borderRadius: 999,
+    paddingVertical: 2,
+    paddingHorizontal: 10,
+  },
+  characterModalBadgePlaceholder: {
+    width: 38,
   },
   characterModalBadge: {
-    color: '#40C5F1',
-    fontSize: 12,
+    color: '#ffffff',
+    fontSize: 11,
     fontWeight: '600',
   },
-  characterModalClose: {
-    marginTop: 12,
-    paddingVertical: 10,
+  switchingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 9999,
   },
-  characterModalCloseText: {
-    color: '#888',
+  switchingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 12,
+  },
+  switchingSuccessBanner: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(40, 40, 40, 0.9)',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    zIndex: 9999,
+  },
+  switchingSuccessText: {
+    color: '#40c5f1',
+    fontSize: 15,
+  },
+  switchingErrorBanner: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(40, 40, 40, 0.9)',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    zIndex: 9999,
+  },
+  switchingErrorText: {
+    color: '#f55',
     fontSize: 15,
   },
 });
