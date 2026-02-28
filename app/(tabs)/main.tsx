@@ -669,6 +669,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       setVoicePrepareStatus('preparing');
       try {
         await mainManager.startRecording();
+        // 清除之前的错误提示（如果有）
+        setSwitchError(null);
+        if (switchErrorTimerRef.current) {
+          clearTimeout(switchErrorTimerRef.current);
+          switchErrorTimerRef.current = null;
+        }
         setVoicePrepareStatus('ready');
         setTimeout(() => setVoicePrepareStatus(null), 800);
       } catch {

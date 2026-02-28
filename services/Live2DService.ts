@@ -97,6 +97,7 @@ export class Live2DService {
   private core: CoreLive2DService;
   private lastLoadingFlag: boolean | null = null;
   private hasWarnedAboutSetViewPosition: boolean = false;
+  private hasWarnedAboutSetViewScale: boolean = false;
 
   constructor(config: Live2DServiceConfig) {
     this.config = {
@@ -410,13 +411,19 @@ export class Live2DService {
       if (typeof ReactNativeLive2dModule.setViewScale === 'function') {
         ReactNativeLive2dModule.setViewScale(scale);
       } else {
-        // Fallback: 使用旧的 setTransform 方法
-        console.warn('⚠️ [Live2DService] setViewScale is not a function, using fallback');
+        // 仅首次打印警告，避免每帧重复
+        if (!this.hasWarnedAboutSetViewScale) {
+          console.warn('⚠️ [Live2DService] setViewScale is not a function, using fallback');
+          this.hasWarnedAboutSetViewScale = true;
+        }
         void this.core.setTransform({ scale } as Transform);
       }
     } catch (e) {
-      console.error('❌ [Live2DService] setViewScale error:', e);
-      // Fallback: 使用旧的 setTransform 方法
+      // 仅首次打印错误，避免每帧重复
+      if (!this.hasWarnedAboutSetViewScale) {
+        console.error('❌ [Live2DService] setViewScale error:', e);
+        this.hasWarnedAboutSetViewScale = true;
+      }
       void this.core.setTransform({ scale } as Transform);
     }
     // 同步更新内部状态，供 getTransformState() 读取

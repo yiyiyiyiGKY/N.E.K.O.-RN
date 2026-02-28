@@ -64,7 +64,7 @@ modelX = startModelX + (translationX / screenWidth) * sensitivity
 modelY = startModelY - (translationY / screenHeight) * sensitivity   ← 注意负号
 ```
 
-> **灵敏度说明**：`sensitivity = 0.3` 表示手指移动整个屏幕距离，模型仅移动 0.3 个逻辑单位。值越小灵敏度越低，需要更大幅度的拖动才能移动模型。
+> **灵敏度说明**：`sensitivity = 0.005`（代码中实际使用的值）表示手指移动整个屏幕距离，模型仅移动 0.005 个逻辑单位。值越小灵敏度越低，需要更大幅度的拖动才能移动模型。
 
 ---
 
@@ -522,7 +522,7 @@ dragIndicatorText: {
 单指注视功能由 Native 层直接处理，不经过 RNGH：
 
 1. **触摸事件流**：
-   ```
+   ```text
    用户触摸屏幕
      → Android dispatchTouchEvent
      → ReactNativeLive2dView.onTouchEvent (返回 true)
