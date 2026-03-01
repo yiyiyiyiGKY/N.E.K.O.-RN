@@ -1,4 +1,4 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { createNativeAudioService } from '@project_neko/audio-service';
 import { createWebAudioService } from '@project_neko/audio-service/web';
 import type { AudioService as CrossPlatformAudioService } from '@project_neko/audio-service';
@@ -260,8 +260,7 @@ export class AudioService {
       const hasPermission = await requestMicrophonePermission();
       if (!hasPermission) {
         console.error('❌ 麦克风权限未授予');
-        Alert.alert('需要权限', '需要麦克风权限才能使用语音功能');
-        return;
+        throw new Error('需要麦克风权限才能使用语音功能');
       }
       console.log('✅ 麦克风权限已授予');
     }
@@ -277,7 +276,6 @@ export class AudioService {
       console.log('🎤 开始录音');
     } catch (error) {
       console.error('❌ 开始录音失败:', error);
-      Alert.alert('错误', '开始录音失败');
       throw error;
     }
   }

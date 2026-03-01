@@ -52,6 +52,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
   // 角色选择 Modal 状态
   const [characterModalVisible, setCharacterModalVisible] = useState(false);
+  const [voiceBlockModalVisible, setVoiceBlockModalVisible] = useState(false);
   const [characterList, setCharacterList] = useState<string[]>([]);
   const [currentCatgirl, setCurrentCatgirl] = useState<string | null>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
@@ -178,6 +179,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
   // 工具栏状态管理（与 Web 版本一致）
   const [isMobile, setIsMobile] = useState(true); // RN 默认为移动端
+  const [screenHeight, setScreenHeight] = useState(() => Dimensions.get('window').height);
   const [toolbarGoodbyeMode, setToolbarGoodbyeMode] = useState(false);
   const [toolbarMicEnabled, setToolbarMicEnabled] = useState(false);
   const [toolbarScreenEnabled, setToolbarScreenEnabled] = useState(false);
@@ -748,7 +750,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const handleSwitchCharacter = useCallback(async (name: string) => {
     // 检查是否在语音模式
     if (toolbarMicEnabled) {
-      Alert.alert('无法切换角色', '语音模式下无法切换角色，请先停止语音对话后再切换');
+      setVoiceBlockModalVisible(true);
       return;
     }
 
@@ -899,8 +901,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   // 检测屏幕尺寸变化
   useEffect(() => {
     const updateIsMobile = () => {
-      const { width } = Dimensions.get('window');
+      const { width, height } = Dimensions.get('window');
       setIsMobile(width <= 768);
+      setScreenHeight(height);
     };
 
     updateIsMobile();
@@ -1008,7 +1011,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           visible
           isMobile={isMobile}
           right={isMobile ? 12 : 24}
-          top={isMobile ? 12 : 24}
+          top={isMobile ? screenHeight * 0.05 : 24}
           micEnabled={toolbarMicEnabled}
           screenEnabled={toolbarScreenEnabled}
           goodbyeMode={toolbarGoodbyeMode}
@@ -1118,6 +1121,42 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
                     );
                   })}
                 </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* 语音模式下无法切换角色提示 Modal */}
+      <Modal
+        visible={voiceBlockModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVoiceBlockModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setVoiceBlockModalVisible(false)}>
+          <View style={styles.characterModalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.characterModalContent, styles.voiceBlockModalContent]}>
+                <View style={[styles.characterModalHeader, styles.voiceBlockModalHeader]}>
+                  <Text style={styles.characterModalTitle}>无法切换角色</Text>
+                  <TouchableOpacity
+                    style={styles.characterModalCloseBtn}
+                    onPress={() => setVoiceBlockModalVisible(false)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.characterModalCloseBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.voiceBlockModalBody}>
+                  语音模式下无法切换角色，请先停止语音对话后再切换。
+                </Text>
+                <TouchableOpacity
+                  style={styles.voiceBlockModalBtn}
+                  onPress={() => setVoiceBlockModalVisible(false)}
+                >
+                  <Text style={styles.voiceBlockModalBtnText}>好的</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -1370,6 +1409,35 @@ const styles = StyleSheet.create({
   switchingErrorText: {
     color: '#f55',
     fontSize: 15,
+  },
+  voiceBlockModalContent: {
+    backgroundColor: '#ffffff',
+    width: '72%',
+  },
+  voiceBlockModalHeader: {
+    backgroundColor: '#40C5F1',
+  },
+  voiceBlockModalBody: {
+    color: '#40C5F1',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginVertical: 16,
+    paddingHorizontal: 20,
+    lineHeight: 22,
+  },
+  voiceBlockModalBtn: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingVertical: 11,
+    borderRadius: 999,
+    backgroundColor: '#40C5F1',
+    alignItems: 'center',
+  },
+  voiceBlockModalBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
 
