@@ -8,6 +8,9 @@ import { useLipSync } from '@/hooks/useLipSync';
 import { useLive2D } from '@/hooks/useLive2D';
 import { useLive2DAgentBackend } from '@/hooks/useLive2DAgentBackend';
 import { useLive2DPreferences } from '@/hooks/useLive2DPreferences';
+import { useImagePicker } from '@/hooks/useImagePicker';
+import { useCamera } from '@/hooks/useCamera';
+import { ImageMessageService } from '@/services/imageMessage';
 import { mainManager } from '@/utils/MainManager';
 import { VoicePrepareOverlay } from '@/components/VoicePrepareOverlay';
 import { useFocusEffect } from '@react-navigation/native';
@@ -15,7 +18,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert, Dimensions, Image, Modal, Platform, ScrollView,
+  Alert, AppState, Dimensions, Image, Modal, Platform, ScrollView,
   StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View,
 } from 'react-native';
 import { ReactNativeLive2dView } from 'react-native-live2d';
@@ -63,6 +66,8 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [isChatForceCollapsed, setIsChatForceCollapsed] = useState(false);
   const [voicePrepareStatus, setVoicePrepareStatus] = useState<'preparing' | 'ready' | null>(null);
   const isSwitchingCharacterRef = useRef(false);
+  // 🔥 新增：应用是否在后台的标志 ref，用于在拍照等场景忽略 WebSocket 错误
+  const isInBackgroundRef = useRef(false);
   // 合并为单一对象，确保 modelName 和 modelUrl 同步更新，避免两次 setState 触发两次 useLive2D effect
   const [live2dModel, setLive2dModel] = useState<{ name: string; url: string | undefined }>({
     name: 'mao_pro',
@@ -83,6 +88,27 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     characterName?: string;
   }>();
   const lastAppliedQrRef = useRef<string | null>(null);
+
+  // 🔥 监听应用状态变化，在应用进入后台时标记状态（如拍照场景）
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        console.log('📱 应用进入后台，标记后台状态');
+        isInBackgroundRef.current = true;
+      } else if (nextAppState === 'active') {
+        console.log('📱 应用回到前台，延迟重置后台状态');
+        // 延迟重置，给 WebSocket 重连时间，避免显示错误
+        setTimeout(() => {
+          isInBackgroundRef.current = false;
+          console.log('📱 后台状态标志已重置');
+        }, 2000);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const qrParam = typeof params.qr === 'string' ? params.qr : undefined;
@@ -246,11 +272,37 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     maxMessages: 100,
   });
 
+  // 图片选择器 hook
+  const imagePicker = useImagePicker({
+    maxSelectionCount: 5,
+    allowsMultipleSelection: true,
+  });
+
+  // 相机 hook
+  const camera = useCamera();
+
+  // 相机拍照结果状态（传递给 ChatContainer 的 externalPendingImages）
+  const [cameraPendingImages, setCameraPendingImages] = useState<{ id: string; base64: string }[]>([]);
+
+  // 处理相机拍照结果
+  useEffect(() => {
+    if (camera.photo) {
+      // 将拍照结果添加到待发送列表
+      const newImage = {
+        id: `camera-${Date.now()}`,
+        base64: camera.photo.base64, // 纯 base64，不添加前缀
+      };
+      setCameraPendingImages(prev => [...prev, newImage].slice(0, 5));
+      camera.clearPhoto();
+    }
+  }, [camera.photo, camera.clearPhoto]);
+
   const audio = useAudio({
     host: config.host,
     port: config.port,
     characterName: config.characterName,
     isSwitchingRef: isSwitchingCharacterRef,  // 传入角色切换标志，用于在切换期间忽略错误
+    isInBackgroundRef: isInBackgroundRef,  // 传入后台标志，用于在拍照等场景忽略错误
     onMessage: async (event) => {
       // 二进制音频数据已由 @project_neko/audio-service 自动播放（通过 Realtime binary 事件接管）
       // 这里仅保留文本消息处理逻辑
@@ -820,6 +872,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     return promise;
   }, [isTextSessionActive, audio.isConnected, audio.isRecording, audio.sendMessage, audio.toggleRecording]);
 
+  // 图片消息服务
+  const imageMessageService = useMemo(() => new ImageMessageService(), []);
+
   // 处理用户发送消息（文本 + 可选图片）
   // 使用 stream_data action 和 clientMessageId 与 N.E.K.O 协议一致
   const handleSendMessage = useCallback(async (text: string, images?: string[]) => {
@@ -835,9 +890,41 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       return;
     }
 
-    // 先发送图片（每张单独发送）
+    // 合并图片来源：
+    // 1. imagePicker.images - 相册选择的图片（expo-image-picker 返回的 base64）
+    // 2. images 参数 - ChatContainer 传入的 pendingScreenshots（相机拍照的 base64）
+    const imagesToSend: string[] = [];
+
+    // 处理相册选择的图片（直接使用 base64，不再重新压缩）
+    if (imagePicker.images.length > 0) {
+      console.log('🖼️ 处理相册图片...');
+      for (const img of imagePicker.images) {
+        // expo-image-picker 返回的 base64 是纯 base64，需要添加 data URI 前缀
+        const mimeType = img.mimeType || 'image/jpeg';
+        const base64WithPrefix = img.base64.startsWith('data:')
+          ? img.base64
+          : `data:${mimeType};base64,${img.base64}`;
+        imagesToSend.push(base64WithPrefix);
+      }
+      console.log(`✅ 相册图片处理完成：${imagePicker.images.length} 张`);
+    }
+
+    // 处理传入的图片（相机拍照的，已经是 base64 格式）
     if (images && images.length > 0) {
-      for (const imgBase64 of images) {
+      console.log('📸 处理相机图片...');
+      for (const img of images) {
+        // 传入的图片可能已经有前缀，也可能没有
+        const base64WithPrefix = img.startsWith('data:')
+          ? img
+          : `data:image/jpeg;base64,${img}`;
+        imagesToSend.push(base64WithPrefix);
+      }
+      console.log(`✅ 相机图片处理完成：${images.length} 张`);
+    }
+
+    // 发送图片
+    if (imagesToSend.length > 0) {
+      for (const imgBase64 of imagesToSend) {
         messageCounterRef.current += 1;
         const clientMessageId = generateMessageId(messageCounterRef.current);
         sentClientMessageIds.current.set(clientMessageId, Date.now());
@@ -845,11 +932,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         audio.sendMessage({
           action: 'stream_data',
           data: imgBase64,
-          input_type: 'camera', // RN 使用 camera（拍照）
+          input_type: 'camera', // 与 N.E.K.O 主项目兼容
           clientMessageId,
         });
       }
-      chat.addMessage(`📸 [已发送${images.length}张照片]`, 'user');
+      chat.addMessage(`📸 [已发送${imagesToSend.length}张照片]`, 'user');
     }
 
     // 再发送文本
@@ -871,7 +958,11 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
       console.log('📤 发送文本消息:', text.substring(0, 50));
     }
-  }, [audio.isConnected, audio.sendMessage, chat.addMessage, ensureTextSession]);
+
+    // 清除已选图片
+    imagePicker.clearImages();
+    setCameraPendingImages([]);
+  }, [audio.isConnected, audio.sendMessage, chat.addMessage, ensureTextSession, imagePicker, imageMessageService, setCameraPendingImages]);
 
   // 检测屏幕尺寸变化
   useEffect(() => {
@@ -1009,6 +1100,20 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           onSendMessage={handleSendMessage}
           disabled={!audio.isConnected}
           forceCollapsed={isChatForceCollapsed}
+          onPickImage={imagePicker.pickImages}
+          onTakePhoto={camera.takePhoto}
+          cameraEnabled={true}
+          externalPendingImages={[
+            ...imagePicker.images.map((img, index) => ({
+              id: `gallery-${Date.now()}-${index}`,
+              base64: img.base64,
+            })),
+            ...cameraPendingImages,
+          ]}
+          onClearExternalPendingImages={() => {
+            imagePicker.clearImages();
+            setCameraPendingImages([]);
+          }}
         />
       </View>
 
