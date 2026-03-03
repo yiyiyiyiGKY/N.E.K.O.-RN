@@ -10,6 +10,8 @@ import { useLive2DAgentBackend } from '@/hooks/useLive2DAgentBackend';
 import { useLive2DPreferences } from '@/hooks/useLive2DPreferences';
 import { useImagePicker } from '@/hooks/useImagePicker';
 import { useCamera } from '@/hooks/useCamera';
+import { useCameraStream } from '@/hooks/useCameraStream';
+import { CameraView } from 'expo-camera';
 import { ImageMessageService } from '@/services/imageMessage';
 import { mainManager } from '@/utils/MainManager';
 import { VoicePrepareOverlay } from '@/components/VoicePrepareOverlay';
@@ -163,7 +165,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   // 从后端获取角色对应的 Live2D 模型信息并更新状态
   const syncLive2dModel = useCallback(async (catgirlName: string) => {
     try {
-      const apiBase = `${buildHttpBaseURL(config)}/api`;
+      const apiBase = buildHttpBaseURL(config);
       const client = createCharactersApiClient(apiBase);
       const modelRes = await client.getCurrentLive2dModel(catgirlName);
       if (modelRes.success && modelRes.model_info) {
@@ -181,7 +183,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   useEffect(() => {
     const syncCurrentCatgirl = async () => {
       try {
-        const apiBase = `${buildHttpBaseURL(config)}/api`;
+        const apiBase = buildHttpBaseURL(config);
         const client = createCharactersApiClient(apiBase);
         const res = await client.getCurrentCatgirl();
         if (res.current_catgirl) {
@@ -217,7 +219,6 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const [screenHeight, setScreenHeight] = useState(() => Dimensions.get('window').height);
   const [toolbarGoodbyeMode, setToolbarGoodbyeMode] = useState(false);
   const [toolbarMicEnabled, setToolbarMicEnabled] = useState(false);
-  const [toolbarScreenEnabled, setToolbarScreenEnabled] = useState(false);
   const [toolbarOpenPanel, setToolbarOpenPanel] = useState<Live2DRightToolbarPanel>(null);
   const [toolbarSettings, setToolbarSettings] = useState<Live2DSettingsState>({
     mergeMessages: true,
@@ -513,6 +514,20 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     }
   });
 
+  // 摄像头流式 hook
+  const cameraStream = useCameraStream({
+    sendMessage: audio.sendMessage,
+    isConnected: audio.isConnected,
+    isInBackgroundRef,
+  });
+
+  // 监听摄像头流错误
+  useEffect(() => {
+    if (cameraStream.error) {
+      statusToastRef.current?.show(`摄像头错误: ${cameraStream.error}`, 3000);
+    }
+  }, [cameraStream.error]);
+
   // 将 audio.connectionStatus 映射到 ConnectionStatus 类型
   // 在角色切换期间，保持 'open' 状态，避免显示断开错误
   const connectionStatus: ConnectionStatus = isSwitchingCharacterRef.current
@@ -769,10 +784,44 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     }
   }, [mainManager]);
 
-  const handleToggleScreen = useCallback((next: boolean) => {
-    setToolbarScreenEnabled(next);
-    // TODO: 实现屏幕分享功能
-  }, []);
+  const handleToggleScreen = useCallback(async (next: boolean) => {
+    if (!next) {
+      // 停止屏幕分享
+      cameraStream.stopStreaming();
+      statusToastRef.current?.show('已停止屏幕分享', 2000);
+      return;
+    }
+
+    // 先检查权限
+    const hasPermission = await cameraStream.checkAndRequestPermission();
+    if (!hasPermission) return;
+
+    // 显示选择对话框
+    Alert.alert(
+      '选择摄像头',
+      '请选择要使用的摄像头',
+      [
+        {
+          text: '前置摄像头',
+          onPress: () => {
+            cameraStream.startStreaming('front');
+            statusToastRef.current?.show('前置摄像头已开始分享', 2000);
+          },
+        },
+        {
+          text: '后置摄像头',
+          onPress: () => {
+            cameraStream.startStreaming('back');
+            statusToastRef.current?.show('后置摄像头已开始分享', 2000);
+          },
+        },
+        {
+          text: '取消',
+          style: 'cancel',
+        },
+      ]
+    );
+  }, [cameraStream.startStreaming, cameraStream.stopStreaming, cameraStream.checkAndRequestPermission]);
 
   const handleGoodbye = useCallback(() => {
     // 如果麦克风正在录音，先停止
@@ -782,9 +831,13 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       // 语音会话停止后，重置 text session 状态
       setIsTextSessionActive(false);
     }
+    // 如果摄像头流正在运行，停止
+    if (cameraStream.isStreaming) {
+      cameraStream.stopStreaming();
+    }
     setToolbarGoodbyeMode(true);
     setToolbarOpenPanel(null);
-  }, [mainManager, toolbarMicEnabled]);
+  }, [mainManager, toolbarMicEnabled, cameraStream.isStreaming, cameraStream.stopStreaming]);
 
   const handleReturn = useCallback(() => {
     setToolbarGoodbyeMode(false);
@@ -795,7 +848,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       const loadCharacters = async () => {
         try {
           setCharacterLoading(true);
-          const apiBase = `${buildHttpBaseURL(config)}/api`;
+          const apiBase = buildHttpBaseURL(config);
           const client = createCharactersApiClient(apiBase);
           const data: CharactersData = await client.getCharacters();
 
@@ -830,7 +883,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
     try {
       setCharacterLoading(true);
-      const apiBase = `${buildHttpBaseURL(config)}/api`;
+      const apiBase = buildHttpBaseURL(config);
       const client = createCharactersApiClient(apiBase);
       const res = await client.setCurrentCatgirl(name);
 
@@ -1129,7 +1182,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           right={isMobile ? 12 : 24}
           top={isMobile ? screenHeight * 0.05 : 24}
           micEnabled={toolbarMicEnabled}
-          screenEnabled={toolbarScreenEnabled}
+          screenEnabled={cameraStream.isStreaming}
           goodbyeMode={toolbarGoodbyeMode}
           openPanel={toolbarOpenPanel}
           onOpenPanelChange={setToolbarOpenPanel}
@@ -1144,6 +1197,24 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           onSettingsMenuClick={handleSettingsMenuClick}
         />
       </View>
+
+      {/* 隐藏的摄像头视图（无预览模式）- 移到屏幕外，完全不可见 */}
+      {cameraStream.hasPermission && (
+        <CameraView
+          ref={cameraStream.cameraRef}
+          style={{
+            position: 'absolute',
+            left: -9999,
+            top: -9999,
+            width: 1,
+            height: 1,
+            opacity: 0,
+          }}
+          facing={cameraStream.facing}
+          onCameraReady={cameraStream.onCameraReady}
+          animateShutter={false}
+        />
+      )}
 
       {/*
         【跨平台组件】ChatContainer 聊天容器

@@ -49,7 +49,7 @@ const Icons = {
 export default function CharacterManagerScreen() {
   const router = useRouter();
   const { config } = useDevConnectionConfig();
-  const apiBase = `${buildHttpBaseURL(config)}/api`;
+  const apiBase = buildHttpBaseURL(config);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
