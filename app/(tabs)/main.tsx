@@ -26,11 +26,13 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
   Live2DRightToolbar,
   ChatContainer,
+  StatusToast,
   type Live2DRightToolbarPanel,
   type Live2DSettingsToggleId,
   type Live2DSettingsState,
   type Live2DAgentToggleId,
   type ConnectionStatus,
+  type StatusToastHandle,
 } from '@project_neko/components';
 
 type MainUIScreenProps = {}
@@ -69,6 +71,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   const isSwitchingCharacterRef = useRef(false);
   // 🔥 新增：应用是否在后台的标志 ref，用于在拍照等场景忽略 WebSocket 错误
   const isInBackgroundRef = useRef(false);
+  // 🔥 新增：记录是否是从后台恢复，用于显示"已恢复连接"提示
+  const wasInBackgroundRef = useRef(false);
+  // StatusToast ref，用于显示连接状态提示
+  const statusToastRef = useRef<StatusToastHandle>(null);
   // 合并为单一对象，确保 modelName 和 modelUrl 同步更新，避免两次 setState 触发两次 useLive2D effect
   const [live2dModel, setLive2dModel] = useState<{ name: string; url: string | undefined }>({
     name: 'mao_pro',
@@ -98,9 +104,12 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         isInBackgroundRef.current = true;
       } else if (nextAppState === 'active') {
         console.log('📱 应用回到前台，延迟重置后台状态');
+        // 标记是从后台恢复，用于显示"已恢复连接"提示
+        wasInBackgroundRef.current = true;
         // 延迟重置，给 WebSocket 重连时间，避免显示错误
         setTimeout(() => {
           isInBackgroundRef.current = false;
+          wasInBackgroundRef.current = false;
           console.log('📱 后台状态标志已重置');
         }, 2000);
       }
@@ -379,6 +388,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         mainManager.onUserSpeechDetected();
       } else if (result?.type === 'turn_end') {
         mainManager.onTurnEnd(result.fullText);
+      } else if ((result?.type === 'status' || result?.type === 'system_notice') && result.message) {
+        // 系统状态消息通过 Toast 显示，不加入聊天列表
+        statusToastRef.current?.show(result.message, 3000);
       } else if (result?.type === 'catgirl_switched' && result.characterName) {
         // 幂等保护：如果已在切换中且目标角色相同，跳过重复处理
         if (isSwitchingCharacterRef.current && currentCatgirlRef.current === result.characterName) {
@@ -450,7 +462,14 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     },
     onConnectionChange: (connected) => {
       if (connected) {
-        chat.addMessage('已连接到服务器', 'system');
+        // 连接成功，显示 Toast 提示
+        if (wasInBackgroundRef.current) {
+          // 从后台恢复后的重连
+          statusToastRef.current?.show('已恢复连接', 2000);
+        } else if (!isSwitchingCharacterRef.current) {
+          // 普通连接成功（非角色切换）
+          statusToastRef.current?.show('已连接到服务器', 2000);
+        }
         if (isSwitchingCharacterRef.current) {
           // 发送 start_session 以重新加载角色音色
           console.log('📤 发送 start_session 以重新加载角色音色');
@@ -484,7 +503,10 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           switchedNameTimerRef.current = setTimeout(() => setSwitchedCharacterName(null), 2500);
         }
       } else {
-        chat.addMessage('与服务器断开连接', 'system');
+        // 连接断开，显示 Toast 提示（仅在非后台状态下显示）
+        if (!isInBackgroundRef.current) {
+          statusToastRef.current?.show('连接已断开，正在尝试重连...', 3000);
+        }
         // 连接断开时重置 text session 状态
         setIsTextSessionActive(false);
       }
@@ -1026,6 +1048,9 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
   return (
     <View style={styles.container}>
+      {/* 状态提示 Toast */}
+      <StatusToast ref={statusToastRef} />
+
       {/* Live2D 舞台区域 */}
       {/* Android 端：GestureDetector 包裹整个容器，同时支持单指注视（原生处理）和双指手势 */}
       {/* iOS 端：直接渲染容器，暂不支持双指手势 */}

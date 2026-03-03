@@ -192,8 +192,8 @@ export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
         
         else if (parsed.type === 'status') {
           console.log('ℹ️ 状态消息:', parsed.message || parsed.data);
-          addMessage(parsed.message || JSON.stringify(parsed.data), 'system');
-          return { type: 'status', data: parsed };
+          // 状态消息不再添加到聊天列表，改为通过 Toast 显示
+          return { type: 'status', message: parsed.message || JSON.stringify(parsed.data), data: parsed };
         } 
         
         else if (parsed.type === 'system' && parsed.data === 'turn end') {
@@ -215,8 +215,8 @@ export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
         }
       } catch (e) {
         console.log('📝 普通文本消息:', event.data);
-        addMessage(event.data, 'system');
-        return { type: 'text', text: event.data };
+        // 非 JSON 的纯文本作为系统通知，通过 Toast 显示
+        return { type: 'system_notice', message: event.data };
       }
     }
 
