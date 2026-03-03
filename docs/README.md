@@ -13,7 +13,7 @@
 | **新成员快速上手** | [guides/onboarding.md](./guides/onboarding.md) |
 | 查看开发路线图 | [ROADMAP.md](./ROADMAP.md) |
 | 查看开发进度 | 自己建的进度表 |
-| 搭建开发环境 | [guides/development.md](./guides/development.md) |
+| 搭建开发环境 | [guides/onboarding.md](./guides/onboarding.md) |
 | 排查问题 | [troubleshooting/](./troubleshooting/) |
 | 了解架构 | [arch/design.md](./arch/design.md) |
 
@@ -33,32 +33,58 @@
 
 ```
 docs/
+├── README.md               # 本文档
 ├── ROADMAP.md              # 开发路线图
 │
 ├── arch/                   # 架构文档
-│   ├── design.md          # 架构设计
-│   ├── rn-development-guide.md  # 开发指南
-│   └── ...
+│   ├── design.md           # 架构设计
+│   ├── rn-development-guide.md  # RN 开发指南
+│   └── cross-project-integration.md  # 跨项目集成
 │
 ├── guides/                 # 开发指南
-│   ├── development.md     # 开发与验收
-│   ├── android-env-macos.md  # Android 环境
-│   └── upstream-sync.md   # 同步主项目
+│   ├── onboarding.md       # 新成员上手指南
+│   ├── android-env-macos.md  # Android 环境 (macOS)
+│   ├── upstream-sync.md    # 同步主项目
+│   └── troubleshooting.md  # 故障排查指南
 │
 ├── modules/                # 模块文档
-│   ├── audio.md           # 音频服务
-│   ├── live2d.md          # Live2D 服务
-│   └── coordination.md    # 主协调层
+│   ├── audio.md            # 音频服务
+│   ├── live2d.md           # Live2D 服务
+│   ├── coordination.md     # 主协调层
+│   ├── audio-playback-analysis.md    # 音频播放分析
+│   └── message-flow-analysis.md      # 消息流分析
 │
 ├── specs/                  # 规格文档
-│   ├── websocket.md       # WebSocket 协议
-│   └── states.md          # 状态机
+│   ├── websocket.md        # WebSocket 协议
+│   ├── states.md           # 状态机
+│   └── voice-interrupt.md  # 语音打断规格
 │
-├── troubleshooting/        # 故障排查
+├── features/               # 功能文档
+│   ├── character-management.md
+│   ├── image-messaging.md
+│   ├── live2d-two-finger-drag.md
 │   └── ...
 │
-└── strategy/               # 策略文档
-    └── cross-platform-components.md
+├── troubleshooting/        # 故障排查与修复记录
+│   ├── android-audio-recording-fix.md
+│   ├── permission-auto-redirect-fix.md
+│   ├── fix-character-switch-chat.md
+│   └── ...
+│
+├── solutions/              # 解决方案
+│   ├── p2p-solution.md
+│   └── frp-reverse-proxy.md
+│
+├── strategy/               # 策略文档
+│   ├── cross-platform-components.md
+│   └── rn-development.md
+│
+├── reference/              # 参考文档
+│   ├── quick-reference.md
+│   └── startup-flow.md
+│
+└── releases/               # 发布记录
+    └── v1.1.0-phase1-*.md
 ```
 
 ---
@@ -88,11 +114,12 @@ docs/
 
 ## 故障排查
 
-| 问题 | 文档 |
+| 类别 | 文档 |
 |------|------|
-| 音频录制 | [android-audio-recording-fix.md](./troubleshooting/android-audio-recording-fix.md) |
-| 权限问题 | [permission-auto-redirect-fix.md](./troubleshooting/permission-auto-redirect-fix.md) |
-| 其他问题 | [guides/troubleshooting.md](./guides/troubleshooting.md) |
+| 故障排查索引 | [troubleshooting/README.md](./troubleshooting/README.md) |
+| 通用排查指南 | [guides/troubleshooting.md](./guides/troubleshooting.md) |
+| 音频录制问题 | [troubleshooting/android-audio-recording-fix.md](./troubleshooting/android-audio-recording-fix.md) |
+| 权限问题 | [troubleshooting/permission-auto-redirect-fix.md](./troubleshooting/permission-auto-redirect-fix.md) |
 
 ---
 

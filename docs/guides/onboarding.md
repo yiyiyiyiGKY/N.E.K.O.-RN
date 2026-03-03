@@ -377,6 +377,6 @@ java -version   # 应显示 17.x
 |------|---------|
 | 语音功能 | [specs/websocket.md](../specs/websocket.md)、[specs/voice-interrupt.md](../specs/voice-interrupt.md) |
 | UI / 组件 | [strategy/cross-platform-components.md](../strategy/cross-platform-components.md) |
-| 环境 / 构建 | [guides/android-env-macos.md](./android-env-macos.md)、[guides/fast-development.md](./fast-development.md) |
+| 环境 / 构建 | [guides/android-env-macos.md](./android-env-macos.md)、[guides/upstream-sync.md](./upstream-sync.md) |
 | 整体架构 | [arch/design.md](../arch/design.md) |
 | 问题排查 | [troubleshooting/](../troubleshooting/) |
