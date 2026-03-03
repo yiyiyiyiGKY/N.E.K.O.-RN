@@ -185,7 +185,7 @@ const StatusToast = forwardRef<StatusToastHandle | null, StatusToastProps>(
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 60,
+    top: 50,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -194,20 +194,17 @@ const styles = StyleSheet.create({
   toast: {
     maxWidth: screenWidth - 48,
     paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(64, 197, 241, 0.6)',
   },
   text: {
-    color: '#fff',
-    fontSize: 14,
+    color: '#40c5f1',
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 18,
   },
 });
 
