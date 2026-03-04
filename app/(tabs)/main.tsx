@@ -1,6 +1,6 @@
 import { createCharactersApiClient } from '@/services/api/characters';
 import type { CharactersData } from '@/services/api/characters';
-import { buildHttpBaseURL } from '@/utils/devConnectionConfig';
+import { buildHttpBaseURL, appendP2PToken } from '@/utils/devConnectionConfig';
 import { useAudio } from '@/hooks/useAudio';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
@@ -88,7 +88,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   // ref 持有最新值，供 useFocusEffect 闭包读取（避免 stale closure）
   const live2dModelRef = useRef(live2dModel);
   live2dModelRef.current = live2dModel;
-  const { config, setConfig, applyQrRaw } = useDevConnectionConfig();
+  const { config, setConfig, applyQrRaw, isLoaded: isConfigLoaded } = useDevConnectionConfig();
   const params = useLocalSearchParams<{
     qr?: string;
     host?: string;
@@ -164,34 +164,52 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
 
   // 从后端获取角色对应的 Live2D 模型信息并更新状态
   const syncLive2dModel = useCallback(async (catgirlName: string) => {
+    console.log('🎨 [syncLive2dModel] called, catgirlName =', catgirlName, 'isConfigLoaded =', isConfigLoaded);
+    // 等待配置加载完成
+    if (!isConfigLoaded) return;
+
     try {
       const apiBase = buildHttpBaseURL(config);
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, config.p2p?.token);
       const modelRes = await client.getCurrentLive2dModel(catgirlName);
+      console.log('🎨 [syncLive2dModel] API 返回:', JSON.stringify(modelRes));
       if (modelRes.success && modelRes.model_info) {
+        const modelUrl = appendP2PToken(`${apiBase}${modelRes.model_info.path}`, config.p2p?.token);
+        console.log('🎨 [syncLive2dModel] 设置模型 URL:', modelUrl);
         setLive2dModel({
           name: modelRes.model_info.name,
-          url: `${buildHttpBaseURL(config)}${modelRes.model_info.path}`,
+          url: modelUrl,
         });
+      } else {
+        console.warn('🎨 [syncLive2dModel] API 返回但无 model_info:', modelRes);
       }
     } catch (e) {
       console.warn('[syncLive2dModel] 获取模型信息失败:', e);
     }
-  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [config, isConfigLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 启动时从服务端获取当前角色，以服务端为准
   useEffect(() => {
+    console.log('🔍 [syncCurrentCatgirl] isConfigLoaded =', isConfigLoaded, 'config =', JSON.stringify({ host: config.host, port: config.port, char: config.characterName, hasP2P: !!config.p2p }));
+    // 等待配置加载完成
+    if (!isConfigLoaded) return;
+    console.log('✅ [syncCurrentCatgirl] 配置已加载，开始同步角色');
+
     const syncCurrentCatgirl = async () => {
       try {
         const apiBase = buildHttpBaseURL(config);
-        const client = createCharactersApiClient(apiBase);
+        console.log('🌐 [syncCurrentCatgirl] apiBase =', apiBase);
+        const client = createCharactersApiClient(apiBase, config.p2p?.token);
         const res = await client.getCurrentCatgirl();
+        console.log('📦 [syncCurrentCatgirl] getCurrentCatgirl 返回:', JSON.stringify(res));
         if (res.current_catgirl) {
           setCurrentCatgirl(res.current_catgirl);
           if (config.characterName !== res.current_catgirl) {
             await setConfig({ ...config, characterName: res.current_catgirl });
           }
+          console.log('🎭 [syncCurrentCatgirl] 准备 syncLive2dModel:', res.current_catgirl);
           await syncLive2dModel(res.current_catgirl);
+          console.log('✅ [syncCurrentCatgirl] syncLive2dModel 完成');
 
           // 发送 start_session 以同步角色音色
           setTimeout(() => {
@@ -206,13 +224,14 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
             }
           }, 500);
         }
-      } catch {
+      } catch (e) {
+        console.warn('❌ [syncCurrentCatgirl] 失败:', e);
         // 网络不通时降级：用本地缓存初始化 UI
         if (config.characterName) setCurrentCatgirl(config.characterName);
       }
     };
     syncCurrentCatgirl();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isConfigLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 工具栏状态管理（与 Web 版本一致）
   const [isMobile, setIsMobile] = useState(true); // RN 默认为移动端
@@ -309,10 +328,15 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     }
   }, [camera.photo, camera.clearPhoto]);
 
+  // 稳定 P2P 配置引用，避免不必要的重连
+  const p2pConfig = useMemo(() => config.p2p, [config.p2p?.token]);
+
   const audio = useAudio({
     host: config.host,
     port: config.port,
     characterName: config.characterName,
+    p2p: p2pConfig,  // P2P 配置（如果存在则使用 P2P 模式连接）
+    enabled: isConfigLoaded,  // 等待配置加载完成后再连接
     isSwitchingRef: isSwitchingCharacterRef,  // 传入角色切换标志，用于在切换期间忽略错误
     isInBackgroundRef: isInBackgroundRef,  // 传入后台标志，用于在拍照等场景忽略错误
     onMessage: async (event) => {
@@ -443,6 +467,13 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
           setSwitchedCharacterName(result.characterName);
           if (switchedNameTimerRef.current) clearTimeout(switchedNameTimerRef.current);
           switchedNameTimerRef.current = setTimeout(() => setSwitchedCharacterName(null), 2500);
+          return;
+        }
+
+        // 竞态保护：syncLive2dModel 期间 onConnectionChange(true) 可能已经完成切换
+        // 此时 isSwitchingCharacterRef 已被重置为 false，无需再设超时
+        if (!isSwitchingCharacterRef.current) {
+          console.log('✅ [catgirl_switched] 切换已在 syncLive2dModel 期间完成，跳过超时设置');
           return;
         }
 
@@ -849,7 +880,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
         try {
           setCharacterLoading(true);
           const apiBase = buildHttpBaseURL(config);
-          const client = createCharactersApiClient(apiBase);
+          const client = createCharactersApiClient(apiBase, config.p2p?.token);
           const data: CharactersData = await client.getCharacters();
 
           const names = Object.keys(data.猫娘 || {});
@@ -884,7 +915,7 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
     try {
       setCharacterLoading(true);
       const apiBase = buildHttpBaseURL(config);
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, config.p2p?.token);
       const res = await client.setCurrentCatgirl(name);
 
       if (res.success) {
@@ -1398,7 +1429,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a2e',
   },
   live2dView: {
     flex: 1,
