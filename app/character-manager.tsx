@@ -50,6 +50,7 @@ export default function CharacterManagerScreen() {
   const router = useRouter();
   const { config } = useDevConnectionConfig();
   const apiBase = buildHttpBaseURL(config);
+  const p2pToken = config.p2p?.token;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,7 +76,7 @@ export default function CharacterManagerScreen() {
       setLoading(true);
       setError(null);
 
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, p2pToken);
       const data: CharactersData = await client.getCharacters();
 
       // Set master profile
@@ -114,7 +115,7 @@ export default function CharacterManagerScreen() {
       setSaving(true);
       setError(null);
 
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, p2pToken);
       const profile: MasterProfile = { 档案名: masterProfile.name };
       if (masterProfile.nickname) profile.昵称 = masterProfile.nickname;
       if (masterProfile.gender) profile.性别 = masterProfile.gender;
@@ -157,7 +158,7 @@ export default function CharacterManagerScreen() {
       setSaving(true);
       setError(null);
 
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, p2pToken);
       const profile = characterToCatgirl(character);
 
       let result;
@@ -195,7 +196,7 @@ export default function CharacterManagerScreen() {
           onPress: async () => {
             try {
               setSaving(true);
-              const client = createCharactersApiClient(apiBase);
+              const client = createCharactersApiClient(apiBase, p2pToken);
               const result = await client.deleteCatgirl(character.id);
 
               if (result.success) {
@@ -220,7 +221,7 @@ export default function CharacterManagerScreen() {
   const handleSetCurrent = useCallback(async (character: Character) => {
     try {
       setSaving(true);
-      const client = createCharactersApiClient(apiBase);
+      const client = createCharactersApiClient(apiBase, p2pToken);
       const result = await client.setCurrentCatgirl(character.name);
 
       if (result.success) {
