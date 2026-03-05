@@ -1,5 +1,5 @@
 import { AudioService, AudioStats } from '@/services/AudioService';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DevConnectionConfig } from '@/utils/devConnectionConfig';
 
 interface UseAudioConfig {
@@ -30,6 +30,7 @@ export interface UseAudioReturn {
   clearAudioQueue: () => void;
   handleUserSpeechDetection: () => void;
   sendMessage: (message: string | object) => void;
+  reconnect: () => void;
 
   // 原始 Service 引用（供高级用户使用）
   audioService: AudioService | null;
@@ -87,6 +88,14 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
   // 稳定化 P2P token，避免对象引用变化导致不必要的重连
   const p2pToken = config.p2p?.token;
 
+  // 重连 key：递增触发 useEffect 销毁旧连接并重建
+  const [reconnectKey, setReconnectKey] = useState(0);
+
+  const reconnect = useCallback(() => {
+    console.log('🔄 手动触发重连');
+    setReconnectKey(k => k + 1);
+  }, []);
+
   // 组件初始化
   useEffect(() => {
     // 配置未加载完成时不初始化连接，避免用 DEFAULT config 发起无效连接
@@ -127,7 +136,7 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
           console.log('📷 应用处于后台，忽略 WebSocket 错误:', error);
           return;
         }
-        console.error('❌ 音频服务错误:', error);
+        console.warn('⚠️ 音频服务错误:', error);
         setConnectionStatus('连接错误');
       },
       onRecordingStateChange: (recording) => {
@@ -161,7 +170,7 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
       // 🔥 修复：清理时重置 isReadyRef，避免 waitForConnection 误判
       isReadyRef.current = false;
     };
-  }, [config.host, config.port, config.characterName, p2pToken, config.enabled]);
+  }, [config.host, config.port, config.characterName, p2pToken, config.enabled, reconnectKey]);
 
   return {
     // 状态
@@ -175,6 +184,7 @@ export const useAudio = (config: UseAudioConfig): UseAudioReturn => {
     clearAudioQueue,
     handleUserSpeechDetection,
     sendMessage,
+    reconnect,
 
     // 原始 Service 引用（供高级用户使用）
     audioService: audioServiceRef.current,

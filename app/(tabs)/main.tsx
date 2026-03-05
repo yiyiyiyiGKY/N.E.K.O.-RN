@@ -902,8 +902,48 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
       loadCharacters();
       return;
     }
+    if (id === 'reload') {
+      setToolbarOpenPanel(null);
+
+      const doReload = async () => {
+        try {
+          // 1. 如果正在录音，先停止
+          if (toolbarMicEnabled) {
+            mainManager.stopRecording();
+            setToolbarMicEnabled(false);
+            setIsTextSessionActive(false);
+          }
+
+          // 2. 清空聊天记录
+          chat.clearMessages();
+
+          // 3. 重连 WebSocket
+          audio.reconnect();
+
+          // 4. 重新加载角色 + Live2D 模型
+          const apiBase = buildHttpBaseURL(config);
+          const client = createCharactersApiClient(apiBase, config.p2p?.token);
+          const res = await client.getCurrentCatgirl();
+          if (res.current_catgirl) {
+            setCurrentCatgirl(res.current_catgirl);
+            if (config.characterName !== res.current_catgirl) {
+              await setConfig({ ...config, characterName: res.current_catgirl });
+            }
+            await syncLive2dModel(res.current_catgirl);
+          }
+
+          statusToastRef.current?.show('重新加载完成', 2000);
+        } catch (e: any) {
+          console.warn('❌ 重新加载失败:', e);
+          statusToastRef.current?.show('重新加载失败: ' + (e.message || '未知错误'), 3000);
+        }
+      };
+      doReload();
+      return;
+    }
+
     Alert.alert('功能提示', `即将打开: ${id}`);
-  }, [config]);
+  }, [config, toolbarMicEnabled, mainManager, chat, audio, syncLive2dModel]);
 
   const handleSwitchCharacter = useCallback(async (name: string) => {
     // 检查是否在语音模式

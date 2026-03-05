@@ -94,6 +94,7 @@ export function Live2DRightToolbar({
       live2dSettings: require('../../../../assets/icons/set_off.png'),
       apiKeys: require('../../../../assets/icons/set_off.png'),
       characterManage: require('../../../../assets/icons/character_icon.png'),
+      reload: require('../../../../assets/icons/character_icon.png'),
       voiceClone: require('../../../../assets/icons/set_off.png'),
       memoryBrowser: require('../../../../assets/icons/set_off.png'),
       steamWorkshop: require('../../../../assets/icons/set_off.png'),
@@ -227,7 +228,7 @@ export function Live2DRightToolbar({
                     <>
                       <View style={styles.separator} />
                       {settingsMenuItems
-                        .filter((item) => item.id === 'characterManage')
+                        .filter((item) => item.id === 'characterManage' || item.id === 'reload')
                         .map((item) => (
                           <TouchableOpacity
                             key={item.id}

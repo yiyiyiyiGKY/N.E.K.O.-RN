@@ -151,8 +151,8 @@ export const styles = StyleSheet.create({
   },
 
   menuIcon: {
-    width: 18,
-    height: 18,
+    width: 24,
+    height: 24,
     resizeMode: 'contain',
   },
 

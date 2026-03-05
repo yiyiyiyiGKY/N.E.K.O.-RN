@@ -289,6 +289,11 @@ export function useSettingsMenuItems<TIcon = ToolbarIcon>(
         icon: mkIcon('characterManage', 'character_icon.png'),
       },
       {
+        id: 'reload' as const,
+        label: tOrDefault(t, 'settings.menu.reload', '重新加载'),
+        icon: mkIcon('reload', 'character_icon.png'),
+      },
+      {
         id: 'voiceClone' as const,
         label: tOrDefault(t, 'settings.menu.voiceClone', '声音克隆'),
         icon: mkIcon('voiceClone', 'voice_clone_icon.png'),

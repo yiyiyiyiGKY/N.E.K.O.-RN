@@ -32,6 +32,7 @@ export type Live2DSettingsMenuId =
   | "live2dSettings"
   | "apiKeys"
   | "characterManage"
+  | "reload"
   | "voiceClone"
   | "memoryBrowser"
   | "steamWorkshop";
