@@ -32,6 +32,7 @@ declare module "expo-file-system" {
     exists: any;
     textSync(): string;
     delete(): Promise<void>;
+    moveAsync(targetFile: File): Promise<void>;
 
     static downloadFileAsync(srcUrl: string, dstDir: Directory): Promise<{ uri: string }>;
   }

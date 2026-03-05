@@ -333,25 +333,29 @@ export default function ChatContainer({
       return;
     }
 
-    const options: string[] = [];
-    if (onPickImage) options.push(tOrDefault(t, 'chat.image.gallery', '从相册选择'));
-    if (onTakePhotoProp) options.push(tOrDefault(t, 'chat.image.camera', '拍照'));
-    options.push(tOrDefault(t, 'common.cancel', '取消'));
+    type AlertOption = { text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void };
+    const options: AlertOption[] = [];
+    if (onPickImage) {
+      options.push({
+        text: tOrDefault(t, 'chat.image.gallery', '从相册选择'),
+        onPress: () => onPickImage(),
+      });
+    }
+    if (onTakePhotoProp) {
+      options.push({
+        text: tOrDefault(t, 'chat.image.camera', '拍照'),
+        onPress: () => handleTakePhoto(),
+      });
+    }
+    options.push({
+      text: tOrDefault(t, 'common.cancel', '取消'),
+      style: 'cancel',
+    });
 
     Alert.alert(
       tOrDefault(t, 'chat.image.title', '添加图片'),
       undefined,
-      options.map((option, index) => ({
-        text: option,
-        style: index === options.length - 1 ? 'cancel' : 'default',
-        onPress: () => {
-          if (index === 0 && onPickImage) {
-            onPickImage();
-          } else if (index === 1 && onTakePhotoProp) {
-            handleTakePhoto();
-          }
-        },
-      }))
+      options
     );
   };
 

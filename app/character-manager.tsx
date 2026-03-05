@@ -97,7 +97,7 @@ export default function CharacterManagerScreen() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, [apiBase, p2pToken]);
 
   useEffect(() => {
     loadCharacters();
@@ -133,7 +133,7 @@ export default function CharacterManagerScreen() {
     } finally {
       setSaving(false);
     }
-  }, [apiBase, masterProfile]);
+  }, [apiBase, p2pToken, masterProfile]);
 
   // Add new catgirl
   const handleAddCatgirl = useCallback(() => {
@@ -181,7 +181,7 @@ export default function CharacterManagerScreen() {
     } finally {
       setSaving(false);
     }
-  }, [apiBase, isNewCharacter, loadCharacters]);
+  }, [apiBase, p2pToken, isNewCharacter, loadCharacters]);
 
   // Delete catgirl
   const handleDeleteCatgirl = useCallback((character: Character) => {
@@ -215,7 +215,7 @@ export default function CharacterManagerScreen() {
         },
       ]
     );
-  }, [apiBase, catgirls]);
+  }, [apiBase, p2pToken, catgirls]);
 
   // Set as current catgirl
   const handleSetCurrent = useCallback(async (character: Character) => {
@@ -236,7 +236,7 @@ export default function CharacterManagerScreen() {
     } finally {
       setSaving(false);
     }
-  }, [apiBase]);
+  }, [apiBase, p2pToken]);
 
   // Render catgirl item
   const renderCatgirlItem = useCallback(({ item }: { item: Character }) => {

@@ -46,10 +46,10 @@ export default function HomeScreen() {
           {isLoaded && (
             <View style={styles.configCard}>
               <View style={styles.configRow}>
-                <Text style={styles.configLabel}>当前连接</Text>
+                <Text style={styles.configLabel}>配置已加载</Text>
                 <View style={styles.statusIndicator}>
                   <View style={styles.statusDot} />
-                  <Text style={styles.statusText}>就绪</Text>
+                  <Text style={styles.statusText}>已就绪</Text>
                 </View>
               </View>
               <Text style={styles.configValue}>
