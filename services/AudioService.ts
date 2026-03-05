@@ -133,7 +133,7 @@ export class AudioService {
             if (isAbnormalClose) {
               console.log('🔌 WebSocket 中断(1006)，等待重连...');
             } else {
-              console.error('❌ WebSocket 错误:', error);
+              console.warn('⚠️ WebSocket 错误:', error);
             }
             this.connectionStatus = ConnectionStatus.ERROR;
             this.config.onError?.(error);
@@ -152,7 +152,7 @@ export class AudioService {
         this.connectionStatus = ConnectionStatus.CONNECTING;
         this.wsService.init();
       } catch (error) {
-        console.error('❌ WebSocket 初始化失败:', error);
+        console.warn('⚠️ WebSocket 初始化失败:', error);
         reject(error);
       }
     });

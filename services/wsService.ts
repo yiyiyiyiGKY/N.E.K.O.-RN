@@ -108,7 +108,7 @@ export class WSService {
       if (isAbnormalClose) {
         console.log('WebSocket连接中断(1006)，将自动重连:', event?.reason || 'abnormal close');
       } else {
-        console.error('WebSocket连接错误:', event);
+        console.warn('WebSocket连接错误:', event);
       }
       this.config.onError?.(event as any);
     });
@@ -124,7 +124,7 @@ export class WSService {
    */
   public send(data: any): void {
     if (!this.client || this.client.getState() !== 'open') {
-      console.error('WebSocket未连接，无法发送消息');
+      console.warn('WebSocket未连接，无法发送消息');
       return;
     }
 
@@ -132,7 +132,7 @@ export class WSService {
       const message = typeof data === 'string' ? data : JSON.stringify(data);
       this.client.send(message);
     } catch (e) {
-      console.error('发送WebSocket消息失败:', e);
+      console.warn('发送WebSocket消息失败:', e);
     }
   }
 
