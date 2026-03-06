@@ -48,7 +48,7 @@ const Icons = {
 
 export default function CharacterManagerScreen() {
   const router = useRouter();
-  const { config } = useDevConnectionConfig();
+  const { config, isLoaded } = useDevConnectionConfig();
   const apiBase = buildHttpBaseURL(config);
   const p2pToken = config.p2p?.token;
 
@@ -100,8 +100,9 @@ export default function CharacterManagerScreen() {
   }, [apiBase, p2pToken]);
 
   useEffect(() => {
+    if (!isLoaded) return;
     loadCharacters();
-  }, [loadCharacters]);
+  }, [loadCharacters, isLoaded]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -111,6 +112,11 @@ export default function CharacterManagerScreen() {
 
   // Save master profile
   const handleSaveMaster = useCallback(async () => {
+    if (!masterProfile.name.trim()) {
+      setError('Name is required');
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);

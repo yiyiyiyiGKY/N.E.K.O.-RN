@@ -26,48 +26,7 @@
 
 ---
 
-## 架构反思：v1 实现的问题
-
-> **核心问题：v1 用 raw TCP + 手动实现 WebSocket 协议，但完全不需要。**
-
-### v1 架构（过度复杂）
-
-```
-手机                      桌面端
-┌─────────────────┐      ┌──────────────────────┐
-│ P2PRealtimeClient│      │    lan_proxy.py       │
-│  (手写 WebSocket │ TCP  │  (raw TCP 代理)       │
-│   帧解析/封装    │─────►│  Token 鉴权           │
-│   手写握手协议   │      │  ↓ 原样转发字节流     │
-│   react-native-  │      │  localhost:48911      │
-│   tcp-socket)    │      │  (Main Server WS)     │
-└─────────────────┘      └──────────────────────┘
-         ↑ 独立代码路径，与标准 WebSocket 完全不同
-```
-
-**问题清单**：
-
-| # | 问题 | 后果 |
-|---|------|------|
-| 1 | 手动实现 WebSocket 帧协议（~90 行） | 帧 masking 未实现，违反 RFC 6455，服务端拒绝帧 |
-| 2 | 手动实现 WebSocket 握手 | Host header 不匹配，容易出错 |
-| 3 | 移动端两套完全不同的连接代码路径 | P2PRealtimeClient vs createNativeRealtimeClient，维护成本翻倍 |
-| 4 | 代理只做 raw TCP 转发 | HTTP API 无法通过代理，手机端获取角色/模型等全部失败 |
-| 5 | 额外依赖 react-native-tcp-socket | 增加包体积和 native 构建复杂度 |
-| 6 | Token 只能用一次 | 断线重连直接失败 |
-| 7 | 角色名硬编码 `'p2p'` | 服务端找不到角色，拒绝连接 |
-
-### 根本原因
-
-React Native 内置了完整的 `WebSocket` 实现（Android 基于 OkHttp，iOS 基于 NSURLSession），支持 `ws://` 协议，自动处理握手、帧封装、masking、ping/pong。
-
-项目里已有的 `@project_neko/realtime` 库的 `createNativeRealtimeClient` 就是用标准 `WebSocket` 的，还自带心跳和自动重连。
-
-**v1 的方案相当于绕过了 RN 的 WebSocket，用 raw TCP socket 从零实现了一遍 WebSocket 协议。**
-
----
-
-## 推荐架构（v2）：HTTP/WebSocket 反向代理
+## 推荐架构：HTTP/WebSocket 反向代理
 
 ### 核心思路
 
@@ -86,22 +45,9 @@ React Native 内置了完整的 `WebSocket` 实现（Android 基于 OkHttp，iOS
          ↑ 与普通连接走完全相同的代码路径
 ```
 
-### v1 vs v2 对比
-
-| | v1（raw TCP 代理） | v2（HTTP/WS 反向代理） |
-|--|------------------------|---------------------------|
-| 移动端 WS 代码 | P2PRealtimeClient.ts (425 行手写) | **0 行**，复用 createNativeRealtimeClient |
-| 帧协议 | 手动实现（masking bug） | RN 内置 WebSocket 自动处理 |
-| HTTP API | 不通（只转发 TCP） | **直接可用**（代理同时转发 HTTP） |
-| 额外 native 依赖 | react-native-tcp-socket | **无** |
-| wsService.ts | 增加 ~30 行 P2P 分支 | **改 URL 即可**，无分支 |
-| 心跳/重连 | P2PRealtimeClient 自己实现 | 复用 realtime 库已有逻辑 |
-| audio-service 兼容 | 需要适配 P2PRealtimeClient 接口 | **无缝兼容**（接口完全相同） |
-| 角色名/模型等信息 | 获取不到（HTTP 不通） | 直接通过代理获取 |
-
 ---
 
-## 同WiFi直连（Layer 1）— v2
+## 同WiFi直连（Layer 1）
 
 ```
 手机(同一WiFi)           电脑
@@ -139,7 +85,7 @@ React Native 内置了完整的 `WebSocket` 实现（Android 基于 OkHttp，iOS
 项目已使用 asyncio，aiohttp 是最自然的选择，原生支持 WebSocket 反向代理。
 
 ```python
-# lan_proxy.py (v2) - HTTP/WS 反向代理，核心约 120 行
+# lan_proxy.py - HTTP/WS 反向代理，核心约 120 行
 
 import secrets
 import asyncio
@@ -302,7 +248,7 @@ const apiBase = config.p2p?.token
 
 ### 可删除的代码
 
-v2 实施后以下文件可完全移除：
+实施后以下文件可完全移除：
 
 ```
 删除: services/P2PRealtimeClient.ts        (425 行，手写 WebSocket 协议)
@@ -343,7 +289,7 @@ v2 实施后以下文件可完全移除：
 
 **UPnP 成功率**：约 60%（受CGNAT、路由器不支持等影响）
 
-> 注意：由于 v2 代理是标准 HTTP/WS 协议，UPnP 映射后手机仍然用标准 WebSocket 连接，代码路径不变。
+> 注意：由于代理是标准 HTTP/WS 协议，UPnP 映射后手机仍然用标准 WebSocket 连接，代码路径不变。
 
 ---
 
@@ -471,7 +417,7 @@ def lookup(device_id: str):
 | **云端阅后即焚** | 地址查询后立即删除，60秒TTL兜底 |
 | **Token可重用** | 允许断线重连（安全性由 256-bit 随机值 + 局域网限制保证） |
 
-**Token验证流程（v2）**：
+**Token验证流程**：
 ```
 手机 ──► ws://ip:48920/ws/test?token=xxx ──► 代理
                                               │
@@ -510,7 +456,7 @@ def lookup(device_id: str):
 
 ---
 
-## 代码量估算（v2）
+## 代码量估算
 
 | 模块 | 行数 | 说明 |
 |------|------|------|
@@ -519,8 +465,6 @@ def lookup(device_id: str):
 | 云端API | ~100行 | FastAPI+Redis |
 | 移动端改动 | ~20行 | URL 构造 + config 解析 |
 | **合计** | **~440行** | 不含FRP集成 |
-
-对比 v1 的 ~850 行，**减少约 50%**，且移动端从 ~300 行降到 ~20 行。
 
 ---
 
@@ -559,11 +503,11 @@ def lookup(device_id: str):
 
 ## 与原版对比
 
-| | 原版四层 | v1 三层 | v2 三层（推荐） |
-|--|---------|---------|----------------|
-| 代理协议 | - | raw TCP | HTTP/WebSocket |
-| 移动端额外代码 | - | ~600行 | ~20行 |
-| 额外 native 依赖 | - | tcp-socket | 无 |
-| HTTP API 可达 | - | 不可达 | 可达 |
-| WebSocket 协议实现 | - | 手写（有 bug） | RN 内置 |
-| 重连支持 | - | 受限（token 单次） | 完整（realtime 库） |
+| | 原版四层 | 当前三层方案 |
+|--|---------|-------------|
+| 代理协议 | - | HTTP/WebSocket |
+| 移动端额外代码 | - | ~20行 |
+| 额外 native 依赖 | - | 无 |
+| HTTP API 可达 | - | 可达 |
+| WebSocket 协议实现 | - | RN 内置 |
+| 重连支持 | - | 完整（realtime 库） |
