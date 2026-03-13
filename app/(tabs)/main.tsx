@@ -4,6 +4,7 @@ import { buildHttpBaseURL, appendP2PToken } from '@/utils/devConnectionConfig';
 import { useAudio } from '@/hooks/useAudio';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
+import { useUdpP2PConnection } from '@/hooks/useUdpP2PConnection';
 import { useLipSync } from '@/hooks/useLipSync';
 import { useLive2D } from '@/hooks/useLive2D';
 import { useLive2DAgentBackend } from '@/hooks/useLive2DAgentBackend';
@@ -90,7 +91,16 @@ const MainUIScreen: React.FC<MainUIScreenProps> = () => {
   // ref 持有最新值，供 useFocusEffect 闭包读取（避免 stale closure）
   const live2dModelRef = useRef(live2dModel);
   live2dModelRef.current = live2dModel;
-  const { config, setConfig, applyQrRaw, isLoaded: isConfigLoaded } = useDevConnectionConfig();
+  const { config, isLoaded: isConfigLoaded, setConfig, applyQrRaw, refreshFromCloud } = useDevConnectionConfig();
+
+  // UDP P2P 连接（自动尝试三层回退）
+  const udpConnection = useUdpP2PConnection(
+    config,
+    isConfigLoaded,
+    setConfig,
+    refreshFromCloud
+  );
+
   const params = useLocalSearchParams<{
     qr?: string;
     host?: string;

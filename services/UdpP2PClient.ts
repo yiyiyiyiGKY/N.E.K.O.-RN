@@ -53,13 +53,14 @@ export class UdpP2PClient extends EventEmitter {
       const endpoint = await this._tryConnect(
         this.config.lanIp,
         this.config.lanPort,
-        5000  // 5秒超时
+        5000,  // 5秒超时
+        1,
+        'LAN'
       );
       if (endpoint) {
         console.log('✅ [UDP P2P] 第1层成功：LAN 直连');
         this.tcpEndpoint = endpoint;
         this.connected = true;
-        this.emit('connected', { layer: 1, method: 'LAN', endpoint });
         return endpoint;
       }
       console.log('⏱️  [UDP P2P] 第1层超时，尝试下一层...');
@@ -71,13 +72,14 @@ export class UdpP2PClient extends EventEmitter {
       const endpoint = await this._tryConnect(
         this.config.stunIp,
         this.config.stunPort,
-        10000  // 10秒超时
+        10000,  // 10秒超时
+        2,
+        'STUN'
       );
       if (endpoint) {
         console.log('✅ [UDP P2P] 第2层成功：STUN 打洞');
         this.tcpEndpoint = endpoint;
         this.connected = true;
-        this.emit('connected', { layer: 2, method: 'STUN', endpoint });
         return endpoint;
       }
       console.log('⏱️  [UDP P2P] 第2层超时，尝试下一层...');
@@ -89,13 +91,14 @@ export class UdpP2PClient extends EventEmitter {
       const endpoint = await this._tryConnect(
         this.config.frpIp,
         this.config.frpPort,
-        10000  // 10秒超时
+        10000,  // 10秒超时
+        3,
+        'FRP'
       );
       if (endpoint) {
         console.log('✅ [UDP P2P] 第3层成功：FRP 中转');
         this.tcpEndpoint = endpoint;
         this.connected = true;
-        this.emit('connected', { layer: 3, method: 'FRP', endpoint });
         return endpoint;
       }
       console.log('⏱️  [UDP P2P] 第3层超时');
@@ -112,7 +115,9 @@ export class UdpP2PClient extends EventEmitter {
   private async _tryConnect(
     ip: string,
     port: number,
-    timeout: number
+    timeout: number,
+    layer: number,
+    method: string
   ): Promise<TcpEndpoint | null> {
     return new Promise((resolve) => {
       try {
@@ -140,6 +145,10 @@ export class UdpP2PClient extends EventEmitter {
               };
 
               this._closeSocket();
+
+              // 触发事件
+              this.emit('connected', { layer, method, endpoint });
+
               resolve(endpoint);
             }
           } catch (e) {
