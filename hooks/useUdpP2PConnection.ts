@@ -116,6 +116,7 @@ export function useUdpP2PConnection(
           stunPort: config.p2p!.stunPort,
           frpIp: config.p2p!.frpIp,
           frpPort: config.p2p!.frpPort,
+          cloudRegistryUrl: process.env.EXPO_PUBLIC_CLOUD_REGISTRY_URL,
         });
 
         // 4. 先注册事件监听，再发起连接
