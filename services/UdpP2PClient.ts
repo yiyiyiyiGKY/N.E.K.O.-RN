@@ -252,9 +252,10 @@ export class UdpP2PClient extends EventEmitter {
         this.socket.on('listening', async () => {
           this.emit('log', 'Socket 就绪，查询公网地址...');
 
-          // STUN 服务器与 FRP 服务器在同一台机器（47.117.174.64:3478）
+          // 复用 FRP UDP 端口查询公网地址，避免依赖 coturn 3478（可能被 WiFi 封锁）
           const stunServer = this.config.frpIp || ip;
-          const myPublicAddr = await this._queryStunAddress(stunServer, 3478);
+          const stunQueryPort = this.config.frpPort || 48920;
+          const myPublicAddr = await this._queryStunAddress(stunServer, stunQueryPort);
 
           if (myPublicAddr && this.config.deviceId && this.config.cloudRegistryUrl) {
             this.emit('log', `我的公网地址: ${myPublicAddr.ip}:${myPublicAddr.port}`);
