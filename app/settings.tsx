@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -19,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import QRCode from 'react-native-qrcode-svg';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
 import { createConfigApiClient, type CoreConfig, type ApiProvider } from '@/services/api/config';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -99,6 +101,20 @@ export default function SettingsScreen() {
   const [coreConfig, setCoreConfig] = useState<CoreConfig>({});
   const [coreProviders, setCoreProviders] = useState<ApiProvider[]>([]);
   const [assistProviders, setAssistProviders] = useState<ApiProvider[]>([]);
+  const [p2pConfig, setP2pConfig] = useState<any>(null);
+
+  // Load P2P config from server
+  const loadP2PConfig = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/p2p-info`);
+      if (response.ok) {
+        const data = await response.json();
+        setP2pConfig(data);
+      }
+    } catch (err) {
+      console.log('P2P info not available:', err);
+    }
+  }, [apiBase]);
 
   // Load config
   const loadConfig = useCallback(async () => {
@@ -125,7 +141,8 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     loadConfig();
-  }, [loadConfig]);
+    loadP2PConfig();
+  }, [loadConfig, loadP2PConfig]);
 
   // Save config
   const handleSave = useCallback(async () => {
@@ -363,6 +380,34 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* P2P Connection QR Code */}
+          {p2pConfig && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionIcon}>📱</Text>
+                <Text style={[styles.sectionTitle, { color: t.sectionTitle }]}>P2P Connection</Text>
+              </View>
+              <View style={[styles.card, { backgroundColor: t.card, alignItems: 'center' }]}>
+                <View style={styles.qrContainer}>
+                  <QRCode
+                    value={JSON.stringify(p2pConfig)}
+                    size={200}
+                    color={isDark ? '#fff' : '#000'}
+                    backgroundColor={isDark ? '#1a1a2e' : '#f0f8ff'}
+                  />
+                </View>
+                <Text style={[styles.qrHint, { color: t.textMuted }]}>
+                  Scan with N.E.K.O. RN App to connect
+                </Text>
+                <View style={styles.p2pInfo}>
+                  <Text style={[styles.p2pInfoText, { color: t.textMuted }]}>
+                    UDP: {p2pConfig.port} | TCP: {p2pConfig.tcp_port}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           {/* Save Button */}
           <View style={styles.saveContainer}>
             <TouchableOpacity
@@ -525,5 +570,23 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  qrContainer: {
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    marginBottom: 12,
+  },
+  qrHint: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  p2pInfo: {
+    marginTop: 8,
+  },
+  p2pInfoText: {
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
