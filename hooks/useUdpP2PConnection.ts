@@ -21,10 +21,18 @@ export function useUdpP2PConnection(
   endpoint: TcpEndpoint | null;
   layer: number | null;
   isConnecting: boolean;
+  logs: string[];
 } {
   const [status, setStatus] = useState<UdpConnectionStatus>('idle');
   const [endpoint, setEndpoint] = useState<TcpEndpoint | null>(null);
   const [layer, setLayer] = useState<number | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const addLog = (msg: string) => {
+    const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    setLogs(prev => [...prev.slice(-49), `[${ts}] ${msg}`]);
+    console.log(`[useUdpP2PConnection] ${msg}`);
+  };
 
   // 使用 ref 防止重复连接
   const hasAttemptedRef = useRef(false);
@@ -53,57 +61,38 @@ export function useUdpP2PConnection(
     const connect = async () => {
       hasAttemptedRef.current = true;
       setStatus('connecting');
-
-      // 调试：打印 P2P 配置
-      console.log('[useUdpP2PConnection] P2P 配置:', JSON.stringify(config.p2p, null, 2));
-      Alert.alert('开始连接', '正在尝试建立 P2P 连接...');
+      addLog(`开始连接，P2P token: ${config.p2p?.token?.slice(0, 8)}...`);
 
       // 1. 先尝试 LAN 直连测试（如果在同一 WiFi 环境）
       if (config.p2p?.lanIp && config.p2p?.lanPort) {
+        addLog(`第1层：LAN 直连 ${config.p2p.lanIp}:${config.p2p.lanPort}`);
         try {
-          console.log(`[useUdpP2PConnection] 测试 LAN 直连: ${config.p2p.lanIp}:${config.p2p.lanPort}`);
-          Alert.alert('第1层', `尝试 LAN 直连: ${config.p2p.lanIp}:${config.p2p.lanPort}`);
-
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时（从2秒增加到5秒）
-
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
           const testResponse = await fetch(
             `http://${config.p2p.lanIp}:${config.p2p.lanPort}/health`,
-            {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-              },
-              signal: controller.signal,
-            }
+            { method: 'GET', signal: controller.signal }
           );
           clearTimeout(timeoutId);
-
           if (testResponse.ok) {
-            console.log('[useUdpP2PConnection] LAN 直连可用，跳过 UDP P2P');
-            Alert.alert('✅ 第1层成功', 'LAN 直连可用');
+            addLog(`✅ 第1层成功：LAN 直连`);
             setStatus('connected');
             setEndpoint({ ip: config.p2p.lanIp, port: config.p2p.lanPort });
             setLayer(1);
-            return; // 直接返回，不尝试 UDP P2P
+            return;
           }
         } catch (e) {
-          console.log('[useUdpP2PConnection] LAN 直连不可用，继续尝试 UDP P2P');
-          Alert.alert('⏱️ 第1层超时', 'LAN 不可用，尝试 UDP P2P...');
+          addLog(`⏱️ 第1层失败：${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
-      console.log('[useUdpP2PConnection] 开始 UDP P2P 连接...');
-
+      addLog('开始 UDP P2P 连接...');
       try {
         // 2. 先从云端刷新最新配置（如果有 deviceId）
         if (config.p2p?.deviceId) {
-          console.log(`[useUdpP2PConnection] 从云端刷新配置: ${config.p2p.deviceId}`);
+          addLog(`从云端刷新配置: ${config.p2p.deviceId}`);
           const refreshed = await refreshFromCloud();
-          if (!refreshed) {
-            console.log('[useUdpP2PConnection] 云端刷新失败，使用本地配置');
-          }
+          addLog(refreshed ? '云端刷新成功' : '云端刷新失败，使用本地配置');
         }
 
         // 3. 创建 UDP 客户端
@@ -120,49 +109,34 @@ export function useUdpP2PConnection(
         });
 
         // 4. 先注册事件监听，再发起连接
-        client.on('connected', ({ layer: connectedLayer }) => {
-          console.log(`[useUdpP2PConnection] 连接层级: ${connectedLayer}`);
+        client.on('log', (msg: string) => addLog(`[client] ${msg}`));
+        client.on('connected', ({ layer: connectedLayer, method }) => {
+          addLog(`✅ 第${connectedLayer}层成功：${method}`);
           setLayer(connectedLayer);
         });
+
+        addLog(`stunIp=${config.p2p!.stunIp} stunPort=${config.p2p!.stunPort}`);
+        addLog(`frpIp=${config.p2p!.frpIp} frpPort=${config.p2p!.frpPort}`);
 
         const tcpEndpoint = await client.connect();
 
         if (tcpEndpoint) {
-          console.log('[useUdpP2PConnection] UDP P2P 连接成功，更新配置...');
-          console.log(`[useUdpP2PConnection] TCP endpoint: ${tcpEndpoint.ip}:${tcpEndpoint.port}`);
-
-          // 5. 更新配置（使用 TCP endpoint）
+          addLog(`连接成功，TCP endpoint: ${tcpEndpoint.ip}:${tcpEndpoint.port}`);
           await setConfig((prev) => ({
             ...prev,
             host: tcpEndpoint.ip,
             port: tcpEndpoint.port,
           }));
-
           setStatus('connected');
           setEndpoint(tcpEndpoint);
-
-          Alert.alert(
-            '✅ 连接成功',
-            `已通过 UDP P2P 连接\n地址: ${tcpEndpoint.ip}:${tcpEndpoint.port}\n层级: ${layer || '未知'}`
-          );
         } else {
-          console.error('[useUdpP2PConnection] UDP P2P 连接失败');
+          addLog('❌ 所有三层连接方式都失败');
           setStatus('failed');
           setLayer(null);
-
-          Alert.alert(
-            '❌ 连接失败',
-            '所有三层连接方式都失败了，请检查网络环境'
-          );
         }
       } catch (e) {
-        console.error('[useUdpP2PConnection] 连接异常:', e);
+        addLog(`❌ 连接异常: ${e instanceof Error ? e.message : String(e)}`);
         setStatus('failed');
-
-        Alert.alert(
-          '连接失败',
-          `连接异常: ${e instanceof Error ? e.message : String(e)}`
-        );
       }
     };
 
@@ -179,5 +153,6 @@ export function useUdpP2PConnection(
     endpoint,
     layer,
     isConnecting: status === 'connecting',
+    logs,
   };
 }
