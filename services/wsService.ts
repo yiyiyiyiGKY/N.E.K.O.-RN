@@ -1,4 +1,5 @@
 import { createNativeRealtimeClient } from '@project_neko/realtime';
+import type { RealtimeEventMap } from '@project_neko/realtime';
 import type { DevConnectionConfig } from '@/utils/devConnectionConfig';
 
 export interface WSServiceConfig {
@@ -30,9 +31,34 @@ export class WSService {
   }
 
   /**
+   * 校验 config 合法性，防止拼接出非法 URL。
+   */
+  private validateConfig(): void {
+    const { host, port, characterName } = this.config;
+
+    if (!host || typeof host !== 'string' || host.trim().length === 0) {
+      throw new Error('[WSService] Invalid host: must be a non-empty string');
+    }
+    if (/[\s\/\?#]/.test(host)) {
+      throw new Error(`[WSService] Invalid host: contains illegal characters: "${host}"`);
+    }
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      throw new Error(`[WSService] Invalid port: must be 1-65535, got ${port}`);
+    }
+    if (!characterName || typeof characterName !== 'string' || characterName.trim().length === 0) {
+      throw new Error('[WSService] Invalid characterName: must be a non-empty string');
+    }
+    if (/[\s\/\?#]/.test(characterName)) {
+      throw new Error(`[WSService] Invalid characterName: contains illegal characters: "${characterName}"`);
+    }
+  }
+
+  /**
    * 初始化WebSocket连接
    */
   public init(): void {
+    this.validateConfig();
+
     // 先断开旧连接（与旧实现一致：init() 代表重新建立连接）
     this.close();
 
@@ -67,7 +93,7 @@ export class WSService {
       url: wsUrl,
       // 与旧版静态脚本/协议对齐：默认 ping 心跳
       heartbeat: { intervalMs: 30_000, payload: { action: 'ping' } },
-      // 复刻旧 WSService 的”固定间隔 + 次数上限”重连策略
+      // 复刻旧 WSService 的"固定间隔 + 次数上限"重连策略
       reconnect: {
         enabled: true,
         minDelayMs: this.reconnectDelay,
@@ -96,34 +122,34 @@ export class WSService {
       this.config.onOpen?.();
     });
 
-    this.client.on('message', (evt: any) => {
+    this.client.on('message', (evt: RealtimeEventMap['message']) => {
       // realtime 只保证 { data } 结构；业务侧主要依赖 event.data
-      this.config.onMessage?.(evt?.rawEvent as any);
+      this.config.onMessage?.(evt.rawEvent as unknown as MessageEvent);
     });
 
-    this.client.on('error', (evt: any) => {
+    this.client.on('error', (evt: RealtimeEventMap['error']) => {
       // 过滤 1006 异常关闭的错误，避免误导性的错误日志
       const event = evt?.event;
-      const isAbnormalClose = event?.code === 1006 ||
-        (event?.reason && event.reason.includes('failed to connect'));
+      const isAbnormalClose = (event as any)?.code === 1006 ||
+        ((event as any)?.reason && (event as any).reason.includes('failed to connect'));
       if (isAbnormalClose) {
-        console.log('WebSocket连接中断(1006)，将自动重连:', event?.reason || 'abnormal close');
+        console.log('WebSocket连接中断(1006)，将自动重连:', (event as any)?.reason || 'abnormal close');
       } else {
         console.warn('WebSocket连接错误:', event);
       }
-      this.config.onError?.(event as any);
+      this.config.onError?.(event as Event);
     });
 
-    this.client.on('close', (evt: any) => {
+    this.client.on('close', (evt: RealtimeEventMap['close']) => {
       console.log('WebSocket连接已关闭:', evt?.event);
-      this.config.onClose?.(evt?.event as any);
+      this.config.onClose?.(evt?.event as CloseEvent);
     });
   }
 
   /**
    * 发送消息
    */
-  public send(data: any): void {
+  public send(data: string | Record<string, unknown>): void {
     if (!this.client || this.client.getState() !== 'open') {
       console.warn('WebSocket未连接，无法发送消息');
       return;
@@ -169,8 +195,8 @@ export class WSService {
    * 获取WebSocket实例（用于需要直接访问的场景）
    * 注意：P2P 模式下返回的是 P2PWebSocket 实例
    */
-  public getWebSocket(): WebSocket | any | null {
-    return this.client?.getSocket() as any;
+  public getWebSocket(): WebSocket | null {
+    return (this.client?.getSocket() as unknown as WebSocket) ?? null;
   }
 
   /**
