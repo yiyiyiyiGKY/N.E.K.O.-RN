@@ -351,7 +351,12 @@ export class Live2DService {
 
     const remoteModelUrl = this.config.modelUrl
       ?? `${this.modelBaseUrl}/${this.config.modelName}.model3.json`;
-    await this.core.loadModel({ uri: remoteModelUrl, source: 'url', id: this.config.modelName });
+    try {
+      await this.core.loadModel({ uri: remoteModelUrl, source: 'url', id: this.config.modelName });
+    } catch (error) {
+      console.error('❌ [Live2DService] loadModel failed:', error);
+      this.config.onModelError?.(error instanceof Error ? error.message : String(error));
+    }
   }
 
   /**
