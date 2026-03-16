@@ -14,6 +14,28 @@ interface UseChatMessagesConfig {
   onMessageUpdated?: (message: ChatMessage) => void;
 }
 
+/**
+ * 服务端消息基础类型。
+ * 对应 docs/specs/websocket.md 中定义的 JSON 负载格式。
+ */
+interface ServerMessage {
+  type: string;
+  text?: string;
+  isNewMessage?: boolean;
+  message?: string;
+  data?: unknown;
+}
+
+/** 运行时类型守卫：校验 JSON.parse 结果是否为合法 ServerMessage。 */
+function isServerMessage(value: unknown): value is ServerMessage {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof (value as ServerMessage).type === 'string'
+  );
+}
+
 export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
   const { maxMessages = 100, onMessageAdded, onMessageUpdated } = config;
 
@@ -153,9 +175,15 @@ export const useChatMessages = (config: UseChatMessagesConfig = {}) => {
     // 处理文本消息
     if (typeof event.data === 'string') {
       try {
-        const parsed = JSON.parse(event.data);
-        console.log('📄 解析的消息:', parsed);
+        const raw: unknown = JSON.parse(event.data);
+        console.log('📄 解析的消息:', raw);
 
+        if (!isServerMessage(raw)) {
+          console.warn('⚠️ Received message without valid "type" field:', raw);
+          return { type: 'other', data: raw };
+        }
+
+        const parsed = raw;
         if (parsed.type === 'gemini_response') {
           const isNewMessage = parsed.isNewMessage || false;
           const text = parsed.text || '';
