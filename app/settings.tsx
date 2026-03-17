@@ -24,8 +24,6 @@ import QRCode from 'react-native-qrcode-svg';
 import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
 import { createConfigApiClient, type CoreConfig, type ApiProvider } from '@/services/api/config';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { changeLanguage, SUPPORTED_LANGUAGES } from '@/i18n';
-
 // Icons as text
 const Icons = {
   back: '←',
@@ -86,9 +84,10 @@ const DARK = {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { config } = useDevConnectionConfig();
+  const { config, isLoaded } = useDevConnectionConfig();
   const apiBase = `http://${config.host}:${config.port}`;
-  const { t, i18n } = useTranslation();
+  const p2pToken = config.p2p?.token;
+  const { t } = useTranslation();
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -124,7 +123,7 @@ export default function SettingsScreen() {
       setLoading(true);
       setError(null);
 
-      const client = createConfigApiClient(apiBase);
+      const client = createConfigApiClient(apiBase, p2pToken);
       const [configData, providersData] = await Promise.all([
         client.getCoreConfig(),
         client.getApiProviders(),
@@ -142,9 +141,10 @@ export default function SettingsScreen() {
   }, [apiBase]);
 
   useEffect(() => {
+    if (!isLoaded) return;
     loadConfig();
     loadP2PConfig();
-  }, [loadConfig, loadP2PConfig]);
+  }, [isLoaded, loadConfig, loadP2PConfig]);
 
   // Save config
   const handleSave = useCallback(async () => {
@@ -153,7 +153,7 @@ export default function SettingsScreen() {
       setError(null);
       setSuccess(null);
 
-      const client = createConfigApiClient(apiBase);
+      const client = createConfigApiClient(apiBase, p2pToken);
       const result = await client.updateCoreConfig(coreConfig);
 
       if (result.success) {
@@ -221,45 +221,6 @@ export default function SettingsScreen() {
           style={styles.content}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={loadConfig} />}
         >
-          {/* Language Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>🌐</Text>
-              <Text style={[styles.sectionTitle, { color: theme.sectionTitle }]}>{t('settings.sections.language')}</Text>
-            </View>
-            <View style={[styles.card, { backgroundColor: theme.card }]}>
-              <View style={styles.field}>
-                <Text style={[styles.label, { color: theme.textLabel }]}>{t('settings.language.select')}</Text>
-                <View style={styles.pickerContainer}>
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <TouchableOpacity
-                      key={lang.code}
-                      style={[
-                        styles.pickerOption,
-                        { backgroundColor: theme.pickerOptionBg, borderColor: theme.pickerOptionBorder },
-                        i18n.language === lang.code && { backgroundColor: theme.accent, borderColor: theme.accent },
-                      ]}
-                      onPress={() => changeLanguage(lang.code)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickerOptionText,
-                          { color: theme.textPrimary },
-                          i18n.language === lang.code && { color: theme.accentText, fontWeight: 'bold' },
-                        ]}
-                      >
-                        {t(`settings.language.languages.${lang.code}`)}
-                      </Text>
-                      {i18n.language === lang.code && (
-                        <Text style={styles.checkmark}>{Icons.check}</Text>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </View>
-
           {/* Core API Section */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -428,7 +389,27 @@ export default function SettingsScreen() {
                 <Text style={styles.sectionIcon}>📱</Text>
                 <Text style={[styles.sectionTitle, { color: theme.sectionTitle }]}>{t('settings.sections.p2p')}</Text>
               </View>
-              <View style={[styles.card, { backgroundColor: theme.card, alignItems: 'center' }]}>
+              <View style={[styles.card, { backgroundColor: theme.card }]}>
+                {/* 说明文字 */}
+                <Text style={[styles.qrDesc, { color: theme.textLabel }]}>
+                  {t('settings.p2p.desc')}
+                </Text>
+
+                {/* 步骤 */}
+                <View style={[styles.qrSteps, { borderColor: theme.inputBorder }]}>
+                  {(['step1', 'step2', 'step3'] as const).map((key, i) => (
+                    <View key={key} style={styles.qrStepRow}>
+                      <View style={[styles.qrStepNum, { backgroundColor: theme.accent }]}>
+                        <Text style={styles.qrStepNumText}>{i + 1}</Text>
+                      </View>
+                      <Text style={[styles.qrStepText, { color: theme.textLabel }]}>
+                        {t(`settings.p2p.${key}`)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* 二维码 */}
                 <View style={styles.qrContainer}>
                   <QRCode
                     value={JSON.stringify(p2pConfig)}
@@ -437,13 +418,19 @@ export default function SettingsScreen() {
                     backgroundColor={isDark ? '#1a1a2e' : '#f0f8ff'}
                   />
                 </View>
-                <Text style={[styles.qrHint, { color: theme.textMuted }]}>
-                  Scan with N.E.K.O. RN App to connect
-                </Text>
-                <View style={styles.p2pInfo}>
-                  <Text style={[styles.p2pInfoText, { color: theme.textMuted }]}>
-                    UDP: {p2pConfig.port} | TCP: {p2pConfig.tcp_port}
-                  </Text>
+
+                {/* 连接参数 */}
+                <View style={[styles.qrInfoBlock, { borderColor: theme.inputBorder }]}>
+                  {[
+                    { label: t('settings.p2p.lanIp'), value: p2pConfig.lan_ip || '--' },
+                    { label: t('settings.p2p.port'),  value: String(p2pConfig.port || '--') },
+                    { label: t('settings.p2p.token'), value: t('settings.p2p.tokenHidden') },
+                  ].map(({ label, value }) => (
+                    <View key={label} style={[styles.qrInfoRow, { borderBottomColor: theme.inputBorder }]}>
+                      <Text style={[styles.qrInfoLabel, { color: theme.textMuted }]}>{label}</Text>
+                      <Text style={[styles.qrInfoValue, { color: theme.textLabel }]}>{value}</Text>
+                    </View>
+                  ))}
                 </View>
               </View>
             </View>

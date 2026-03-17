@@ -8,6 +8,7 @@ import { useDevConnectionConfig } from '@/hooks/useDevConnectionConfig';
 import { hasUserStoredConfig } from '@/services/DevConnectionStorage';
 import { sessionStore } from '@/utils/sessionStore';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { changeLanguage, SUPPORTED_LANGUAGES } from '@/i18n';
 
 type ConnectionStatus = 'online' | 'offline';
 
@@ -58,7 +59,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const theme = isDark ? DARK : LIGHT;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const isFocused = useIsFocused();
   const [isConnected, setIsConnected] = useState(sessionStore.isConnected);
@@ -108,6 +109,33 @@ export default function HomeScreen() {
               <Text style={styles.actionIcon}>🐱</Text>
               <Text style={[styles.actionText, { color: theme.textPrimary }]}>{t('home.characterManager')}</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 语言选择 */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.sectionTitle }]}>🌐 {t('settings.sections.language')}</Text>
+          <View style={styles.langRow}>
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <TouchableOpacity
+                key={lang.code}
+                style={[
+                  styles.langButton,
+                  { backgroundColor: theme.actionBtn, borderColor: theme.actionBorder },
+                  i18n.language === lang.code && { backgroundColor: theme.titleColor, borderColor: theme.titleColor },
+                ]}
+                onPress={() => changeLanguage(lang.code)}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.langText,
+                  { color: theme.textPrimary },
+                  i18n.language === lang.code && { color: '#fff', fontWeight: 'bold' },
+                ]}>
+                  {lang.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
@@ -210,6 +238,23 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  langRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  langButton: {
+    width: '31%',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  langText: {
+    fontSize: 13,
+    textAlign: 'center',
   },
   configCard: {
     borderRadius: 16,

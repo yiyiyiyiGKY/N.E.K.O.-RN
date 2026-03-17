@@ -92,12 +92,18 @@ const failedRefresh = async () => { throw new Error('No refresh token'); };
 /**
  * Create config API client
  */
-export function createConfigApiClient(apiBase: string) {
+export function createConfigApiClient(apiBase: string, p2pToken?: string) {
   const client = createRequestClient({
     baseURL: `${apiBase}/api`,
     storage: noopStorage,
     refreshApi: failedRefresh,
     returnDataOnly: true,
+    ...(p2pToken && {
+      requestInterceptor: (config) => {
+        config.headers['X-Proxy-Token'] = p2pToken;
+        return config;
+      },
+    }),
   });
 
   return {

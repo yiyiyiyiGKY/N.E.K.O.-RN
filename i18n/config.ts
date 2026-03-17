@@ -1,6 +1,5 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { getLocales } from 'expo-localization';
 import { I18nManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -28,8 +27,13 @@ export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number]['code'];
 
 // 获取系统语言
 export function getSystemLanguage(): string {
-  const deviceLocales = getLocales();
-  const deviceLanguage = deviceLocales[0]?.languageCode || 'zh-CN';
+  let deviceLanguage = 'zh';
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    deviceLanguage = locale.split('-')[0];
+  } catch {
+    // fallback to zh-CN
+  }
 
   // 映射系统语言到支持的语言
   const langMap: Record<string, string> = {

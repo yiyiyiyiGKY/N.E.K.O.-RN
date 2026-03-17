@@ -20,7 +20,6 @@
     "config": "配置",
     "content": "内容"
   },
-
   "home": {
     "title": "Project N.E.K.O.",
     "shortcuts": "快捷功能",
@@ -39,7 +38,6 @@
       "currentRole": "角色"
     }
   },
-
   "main": {
     "chat": {
       "title": "对话",
@@ -82,7 +80,6 @@
       "p2pLayer": "P2P 连接层"
     }
   },
-
   "settings": {
     "title": "设置",
     "sections": {
@@ -119,8 +116,15 @@
     },
     "p2p": {
       "title": "P2P 配置",
-      "token": "P2P 令牌",
-      "qrCode": "P2P 二维码"
+      "token": "连接令牌",
+      "qrCode": "P2P 二维码",
+      "desc": "使用手机 App 扫描下方二维码，即可自动配置连接信息",
+      "step1": "确保手机与电脑在同一 WiFi 下",
+      "step2": "打开 N.E.K.O. App，点击「扫码配置」",
+      "step3": "对准二维码扫描，连接自动完成",
+      "lanIp": "局域网 IP",
+      "port": "端口",
+      "tokenHidden": "（已隐藏，扫码可自动获取）"
     },
     "serverInfo": {
       "host": "主机地址",
@@ -128,7 +132,6 @@
       "character": "当前角色"
     }
   },
-
   "connection": {
     "status": {
       "connected": "已连接",
@@ -143,14 +146,12 @@
       "invalidConfig": "配置无效"
     }
   },
-
   "toast": {
     "connectionRestored": "已恢复连接",
     "switchedCharacter": "已切换到 {{name}}",
     "settingsSaved": "设置已保存",
     "errorOccurred": "发生错误: {{error}}"
   },
-
   "qrScanner": {
     "title": "扫描二维码",
     "titleDev": "开发扫码配置",
@@ -170,7 +171,6 @@
     "refocus": "重新对焦",
     "back": "返回"
   },
-
   "serverConfig": {
     "title": "服务器配置",
     "host": "主机地址",
@@ -192,7 +192,7 @@
     "resetConfirm": "确定要恢复默认配置吗？",
     "instructions": "如何获取服务器地址",
     "instruction1": "1. 在电脑上启动 Nekotong 应用",
-    "instruction2": "2. 在应用界面左上角查看"连接地址"",
+    "instruction2": "2. 在应用界面左上角查看「连接地址」",
     "instruction3": "3. 输入下方显示的 IP 地址和端口号",
     "quickFill": "快速填充:",
     "serverAddress": "服务器地址",
@@ -209,7 +209,6 @@
     "tip2": "如果连接失败，请检查防火墙设置",
     "tip3": "也可以使用扫码配置功能自动填充"
   },
-
   "characterManager": {
     "title": "角色管理",
     "select": "选择角色",
@@ -239,5 +238,13 @@
     "setCurrentSuccess": "{{name}} 已设为当前角色",
     "noCharacters": "暂无角色",
     "addCharacterHint": "点击 + 添加新角色"
+  },
+  "privacy": {
+    "title": "隐私政策",
+    "agree": "同意并继续",
+    "disagree": "不同意（退出）",
+    "disagreeTitle": "无法继续",
+    "iosCannotExit": "您必须同意隐私政策才能使用本应用。如需退出，请从主屏幕关闭应用。",
+    "content": "欢迎使用 N.E.K.O.（以下简称\"本应用\"）。在使用本应用前，请仔细阅读以下隐私政策。\n\n一、信息收集\n本应用仅在本地设备上存储以下信息：\n· 服务器连接配置（主机地址、端口）\n· 用户语言偏好设置\n· 角色与界面个性化配置\n\n二、权限使用说明\n· 相机权限：仅用于扫描二维码进行服务器配置，以及支持实时视觉功能。\n· 麦克风权限：仅用于语音输入功能，录音数据不会上传至任何第三方服务器。\n· 网络权限：用于与您自行部署的 N.E.K.O. 服务器进行通信。\n\n三、数据共享\n本应用不会向任何第三方收集、传输或出售您的个人信息。应用内不包含任何第三方广告 SDK、数据分析 SDK 或行为追踪组件。\n\n四、数据安全\n所有配置数据均存储于您本地设备，本应用对其不具有远程访问能力。\n\n五、联系我们\n如您对本隐私政策有任何疑问，请通过项目官方渠道与我们联系。\n\n继续使用本应用，即表示您已阅读并同意上述隐私政策。"
   }
 }

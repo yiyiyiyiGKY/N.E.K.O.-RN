@@ -20,7 +20,6 @@
     "config": "Config",
     "content": "Content"
   },
-
   "home": {
     "title": "Project N.E.K.O.",
     "shortcuts": "Shortcuts",
@@ -39,7 +38,6 @@
       "currentRole": "Character"
     }
   },
-
   "main": {
     "chat": {
       "title": "Chat",
@@ -79,7 +77,6 @@
       "p2pLayer": "P2P Connection Layer"
     }
   },
-
   "settings": {
     "title": "Settings",
     "sections": {
@@ -116,8 +113,15 @@
     },
     "p2p": {
       "title": "P2P Configuration",
-      "token": "P2P Token",
-      "qrCode": "P2P QR Code"
+      "token": "Connection Token",
+      "qrCode": "P2P QR Code",
+      "desc": "Scan the QR code below with the N.E.K.O. App to auto-configure connection",
+      "step1": "Make sure your phone and PC are on the same WiFi",
+      "step2": "Open N.E.K.O. App and tap \"Scan QR\"",
+      "step3": "Scan the code — connection sets up automatically",
+      "lanIp": "LAN IP",
+      "port": "Port",
+      "tokenHidden": "(hidden — obtained automatically via QR)"
     },
     "serverInfo": {
       "host": "Host Address",
@@ -125,7 +129,6 @@
       "character": "Current Character"
     }
   },
-
   "connection": {
     "status": {
       "connected": "Connected",
@@ -140,14 +143,12 @@
       "invalidConfig": "Invalid configuration"
     }
   },
-
   "toast": {
     "connectionRestored": "Connection restored",
     "switchedCharacter": "Switched to {{name}}",
     "settingsSaved": "Settings saved",
     "errorOccurred": "Error occurred: {{error}}"
   },
-
   "qrScanner": {
     "title": "Scan QR Code",
     "titleDev": "Dev QR Config",
@@ -167,7 +168,6 @@
     "refocus": "Refocus",
     "back": "Back"
   },
-
   "serverConfig": {
     "title": "Server Configuration",
     "host": "Host Address",
@@ -206,7 +206,6 @@
     "tip2": "If connection fails, check your firewall settings",
     "tip3": "You can also use QR scanning for automatic configuration"
   },
-
   "characterManager": {
     "title": "Character Manager",
     "select": "Select Character",
@@ -236,5 +235,13 @@
     "setCurrentSuccess": "{{name}} is now the current character",
     "noCharacters": "No characters yet",
     "addCharacterHint": "Tap + to add a new character"
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "agree": "Agree & Continue",
+    "disagree": "Disagree (Exit)",
+    "disagreeTitle": "Cannot Continue",
+    "iosCannotExit": "You must agree to the Privacy Policy to use this app. To exit, please close the app from your home screen.",
+    "content": "Welcome to N.E.K.O. (hereinafter referred to as \"the App\"). Please read the following Privacy Policy carefully before using the App.\n\n1. Information We Collect\nThe App only stores the following information locally on your device:\n· Server connection settings (host address, port)\n· Language preference\n· Character and UI personalization settings\n\n2. Permission Usage\n· Camera: Used only for QR code scanning to configure server connections and to support real-time visual features.\n· Microphone: Used only for voice input. Audio data is never uploaded to any third-party server.\n· Network: Used to communicate with your self-hosted N.E.K.O. server.\n\n3. Data Sharing\nThe App does not collect, transmit, or sell your personal information to any third party. The App contains no third-party advertising SDKs, analytics SDKs, or behavioral tracking components.\n\n4. Data Security\nAll configuration data is stored on your local device. The App has no remote access to this data.\n\n5. Contact Us\nIf you have any questions about this Privacy Policy, please contact us through the project's official channels.\n\nBy continuing to use the App, you acknowledge that you have read and agreed to this Privacy Policy."
   }
 }
