@@ -24,8 +24,8 @@ function createSimpleVAD(opts: {
   onSpeechStart?: () => void;
   onSpeechEnd?: () => void;
 }) {
-  const speechThreshold = opts.speechThreshold ?? 0.02;
-  const silenceThreshold = opts.silenceThreshold ?? 0.01;
+  let speechThreshold = opts.speechThreshold ?? 0.02;
+  let silenceThreshold = opts.silenceThreshold ?? 0.01;
   const minSpeechFrames = opts.minSpeechFrames ?? 2;
   const silenceFrames = opts.silenceFrames ?? 8;
 
@@ -61,7 +61,12 @@ function createSimpleVAD(opts: {
     state.consecutiveSilenceFrames = 0;
   }
 
-  return { processFrame, reset, getState: () => ({ ...state }) };
+  function updateThreshold(threshold: number) {
+    speechThreshold = threshold;
+    silenceThreshold = threshold * 0.75;
+  }
+
+  return { processFrame, reset, updateThreshold, getState: () => ({ ...state }) };
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
@@ -93,13 +98,27 @@ export function createNativeAudioService(args: {
 
   // 当前是否正在播放（用于 VAD 门控）
   let isPlaying = false;
+  // 动态回声校准
+  const CALIBRATION_FRAMES = 10;       // 校准帧数（约 320ms）
+  const ECHO_GATE_MULTIPLIER = 1.8;    // 阈值 = 回声均值 × 此倍数
+  let calibrationFrames: number[] = [];
+  let calibratedThreshold = 0.08;      // 初始默认值
 
   // 客户端 VAD：过滤回声，只有真正的人声才发给服务器
   const vad = createSimpleVAD({
     speechThreshold: 0.08,
     silenceThreshold: 0.06,
     minSpeechFrames: 2,
-    silenceFrames: 8,
+    silenceFrames: 6,
+    onSpeechStart: () => {
+      // 检测到人声立即停止播放，不等服务器 user_activity，消除网络往返延迟
+      if (isPlaying) {
+        try { PCMStream.stopPlayback(); } catch (_e) {}
+        isPlaying = false;
+        outputAmpMutedUntil = Date.now() + OUTPUT_AMP_MUTE_AFTER_INTERRUPT_MS;
+        emitter.emit("outputAmplitude", { amplitude: 0 });
+      }
+    },
   });
 
   let state: AudioServiceState = "idle";
@@ -133,12 +152,18 @@ export function createNativeAudioService(args: {
     ampSub = PCMStream.addListener("onAmplitudeUpdate", (event: any) => {
       if (Date.now() < outputAmpMutedUntil) return;
       const amp = typeof event?.amplitude === "number" ? event.amplitude : 0;
+      if (!isPlaying && amp > 0.01) {
+        // 播放刚开始，重置校准
+        isPlaying = true;
+        calibrationFrames = [];
+      }
       isPlaying = amp > 0.01;
       emitter.emit("outputAmplitude", { amplitude: Math.max(0, Math.min(1, amp)) });
     });
 
     playbackStopSub = PCMStream.addListener("onPlaybackStop", () => {
       isPlaying = false;
+      calibrationFrames = [];
       vad.reset();
       emitter.emit("outputAmplitude", { amplitude: 0 });
     });
@@ -167,6 +192,18 @@ export function createNativeAudioService(args: {
       if (Date.now() < micMutedUntil) return;
 
       const int16 = new Int16Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
+
+      // 播放时前 N 帧用于校准回声阈值，不发送
+      if (isPlaying && calibrationFrames.length < CALIBRATION_FRAMES) {
+        calibrationFrames.push(calcRMS(int16));
+        if (calibrationFrames.length === CALIBRATION_FRAMES) {
+          const avg = calibrationFrames.reduce((a, b) => a + b, 0) / CALIBRATION_FRAMES;
+          calibratedThreshold = Math.max(0.04, avg * ECHO_GATE_MULTIPLIER);
+          vad.updateThreshold(calibratedThreshold);
+          console.log(`🎚️ 回声校准完成: 均值=${avg.toFixed(4)} 阈值=${calibratedThreshold.toFixed(4)}`);
+        }
+        return;
+      }
 
       // 客户端 VAD 门控：播放时只有检测到真实人声才发送，过滤回声
       const isSpeaking = vad.processFrame(int16);
@@ -379,6 +416,7 @@ export function createNativeAudioService(args: {
       PCMStream.stopPlayback();
     } catch (_e) {}
     isPlaying = false;
+    calibrationFrames = [];
     vad.reset();
     manualInterruptActive = true;
     micMutedUntil = Date.now() + MIC_MUTE_AFTER_INTERRUPT_MS;
