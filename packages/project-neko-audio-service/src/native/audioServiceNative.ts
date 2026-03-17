@@ -3,6 +3,67 @@ import { TinyEmitter } from "@project_neko/common";
 import { SpeechInterruptController } from "../protocol";
 import type { AudioService, AudioServiceEvents, AudioServiceState, NekoWsIncomingJson, RealtimeClientLike } from "../types";
 
+/** 简单 VAD：基于 RMS 振幅 + 防抖，适用于 React Native */
+function calcRMS(int16: Int16Array): number {
+  let sum = 0;
+  for (let i = 0; i < int16.length; i++) sum += (int16[i] / 32768) ** 2;
+  return Math.sqrt(sum / int16.length);
+}
+
+interface SimpleVADState {
+  isSpeaking: boolean;
+  consecutiveSpeechFrames: number;
+  consecutiveSilenceFrames: number;
+}
+
+function createSimpleVAD(opts: {
+  speechThreshold?: number;      // RMS 超过此值认为有语音，默认 0.02
+  silenceThreshold?: number;     // RMS 低于此值认为静音，默认 0.01
+  minSpeechFrames?: number;      // 连续多少帧才确认语音开始，默认 2
+  silenceFrames?: number;        // 连续多少帧静音才确认语音结束，默认 8
+  onSpeechStart?: () => void;
+  onSpeechEnd?: () => void;
+}) {
+  const speechThreshold = opts.speechThreshold ?? 0.02;
+  const silenceThreshold = opts.silenceThreshold ?? 0.01;
+  const minSpeechFrames = opts.minSpeechFrames ?? 2;
+  const silenceFrames = opts.silenceFrames ?? 8;
+
+  const state: SimpleVADState = {
+    isSpeaking: false,
+    consecutiveSpeechFrames: 0,
+    consecutiveSilenceFrames: 0,
+  };
+
+  function processFrame(int16: Int16Array): boolean {
+    const rms = calcRMS(int16);
+    if (rms >= speechThreshold) {
+      state.consecutiveSpeechFrames++;
+      state.consecutiveSilenceFrames = 0;
+      if (!state.isSpeaking && state.consecutiveSpeechFrames >= minSpeechFrames) {
+        state.isSpeaking = true;
+        opts.onSpeechStart?.();
+      }
+    } else if (rms < silenceThreshold) {
+      state.consecutiveSilenceFrames++;
+      state.consecutiveSpeechFrames = 0;
+      if (state.isSpeaking && state.consecutiveSilenceFrames >= silenceFrames) {
+        state.isSpeaking = false;
+        opts.onSpeechEnd?.();
+      }
+    }
+    return state.isSpeaking;
+  }
+
+  function reset() {
+    state.isSpeaking = false;
+    state.consecutiveSpeechFrames = 0;
+    state.consecutiveSilenceFrames = 0;
+  }
+
+  return { processFrame, reset, getState: () => ({ ...state }) };
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
   if (!ms || ms <= 0) return p;
   let timer: any = null;
@@ -29,6 +90,17 @@ export function createNativeAudioService(args: {
 }): AudioService & { on: TinyEmitter<AudioServiceEvents>["on"]; getState: () => AudioServiceState } {
   const emitter = new TinyEmitter<AudioServiceEvents>();
   const interrupt = new SpeechInterruptController();
+
+  // 当前是否正在播放（用于 VAD 门控）
+  let isPlaying = false;
+
+  // 客户端 VAD：过滤回声，只有真正的人声才发给服务器
+  const vad = createSimpleVAD({
+    speechThreshold: 0.08,
+    silenceThreshold: 0.06,
+    minSpeechFrames: 2,
+    silenceFrames: 8,
+  });
 
   let state: AudioServiceState = "idle";
   const setState = (next: AudioServiceState) => {
@@ -59,15 +131,15 @@ export function createNativeAudioService(args: {
     if (ampSub) return;
 
     ampSub = PCMStream.addListener("onAmplitudeUpdate", (event: any) => {
-      // 打断后屏蔽一段时间，防止缓冲区余音让 isPlaying 保持 true
       if (Date.now() < outputAmpMutedUntil) return;
       const amp = typeof event?.amplitude === "number" ? event.amplitude : 0;
-      // onAmplitudeUpdate 来自 PCMStreamPlayer（播放振幅），应映射为 outputAmplitude
+      isPlaying = amp > 0.01;
       emitter.emit("outputAmplitude", { amplitude: Math.max(0, Math.min(1, amp)) });
     });
 
     playbackStopSub = PCMStream.addListener("onPlaybackStop", () => {
-      // 播放完成：输出 0，方便口型收嘴
+      isPlaying = false;
+      vad.reset();
       emitter.emit("outputAmplitude", { amplitude: 0 });
     });
   };
@@ -91,12 +163,16 @@ export function createNativeAudioService(args: {
       const pcm: Uint8Array | undefined = event?.pcm;
       if (!pcm) return;
 
-      // 打断后静音期内丢弃麦克风数据，防止扬声器尾音被当作用户输入
+      // 打断后静音期内丢弃麦克风数据
       if (Date.now() < micMutedUntil) return;
 
-      // 与旧版协议一致：stream_data + input_type=audio + data 为 number[]
+      const int16 = new Int16Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
+
+      // 客户端 VAD 门控：播放时只有检测到真实人声才发送，过滤回声
+      const isSpeaking = vad.processFrame(int16);
+      if (isPlaying && !isSpeaking) return;
+
       try {
-        const int16 = new Int16Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
         args.client.sendJson({
           action: "stream_data",
           data: Array.from(int16 as any),
@@ -302,11 +378,10 @@ export function createNativeAudioService(args: {
     try {
       PCMStream.stopPlayback();
     } catch (_e) {}
-    // 手动打断：丢弃后续飞来的 binary 音频帧，直到新一轮 audio_chunk 到来
+    isPlaying = false;
+    vad.reset();
     manualInterruptActive = true;
-    // 打断后静音麦克风一段时间，避免扬声器尾音被录入
     micMutedUntil = Date.now() + MIC_MUTE_AFTER_INTERRUPT_MS;
-    // 打断后屏蔽播放振幅事件，避免缓冲区余音让按钮消不掉
     outputAmpMutedUntil = Date.now() + OUTPUT_AMP_MUTE_AFTER_INTERRUPT_MS;
     emitter.emit("outputAmplitude", { amplitude: 0 });
   };
